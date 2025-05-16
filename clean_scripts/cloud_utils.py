@@ -116,8 +116,6 @@ def load_lattice_npy(directory: str, filename: str) -> np.ndarray:
 
     return np.load(path)
 
-import warnings
-
 def filter_labeled_features_by_size(
     labeled_lattice: np.ndarray,
     min_area: int = None,
@@ -382,7 +380,7 @@ def extract_cropped_clouds_by_size(
             - "two_edge" (touches two edges, not opposite)
             - "mirrorable" (single_edge or two_edge)
             - "valid" (internal or mirrorable)
-            - "non_mirrorable" (touches >= 3 edges or opposite edges)
+            - "non_mirrorable" (touches >= 3 edges or opposite edges) OR (all - valid)
             - "all" (no contact constraint; default)
 
     Returns:
@@ -436,7 +434,7 @@ def extract_cropped_clouds_by_size(
 
 def slice_cloud_into_segments(
     cloud: np.ndarray,
-    num_slices: int,
+    num_segments: int,
     min_col_width: int = 3
 ) -> Union[list[dict], bool]:
     """
@@ -445,7 +443,7 @@ def slice_cloud_into_segments(
     Each segment has at least `min_col_width` columns. If not possible, the function
     returns False and emits a warning.
 
-    For each slice, the following metadata is returned:
+    For each segment, the following metadata is returned:
     - segment (2D bool array)
     - segment_id (int)
     - start_col (int)
@@ -458,7 +456,7 @@ def slice_cloud_into_segments(
     ----------
     cloud : np.ndarray
         A 2D boolean array representing a single cloud feature.
-    num_slices : int
+    num_segments : int
         Number of vertical segments to divide the cloud into.
     min_col_width : int, optional
         Minimum width (in columns) for each segment (default is 3).
@@ -472,25 +470,25 @@ def slice_cloud_into_segments(
         raise ValueError("Expected input cloud to be a boolean array.")
 
     h, w = cloud.shape
-    if num_slices < 1:
-        raise ValueError("Number of slices must be >= 1.")
+    if num_segments < 1:
+        raise ValueError("Number of segments must be >= 1.")
 
-    if w < num_slices * min_col_width:
+    if w < num_segments * min_col_width:
         warnings.warn(
-            f"Cloud width {w} too small to generate {num_slices} slices "
+            f"Cloud width {w} too small to generate {num_segments} segments "
             f"with minimum width {min_col_width}."
         )
         return False
 
-    base_width = w // num_slices
-    remainder = w % num_slices
+    base_width = w // num_segments
+    remainder = w % num_segments
 
     segments = []
     left_edges = []
     right_edges = []
 
     start_col = 0
-    for i in range(num_slices):
+    for i in range(num_segments):
         slice_width = base_width + (1 if i < remainder else 0)
         end_col = start_col + slice_width
 
@@ -515,8 +513,8 @@ def slice_cloud_into_segments(
 
         start_col = end_col
 
-    # Compute shared edge count between adjacent slices
-    for i in range(1, num_slices):
+    # Compute shared edge count between adjacent segments
+    for i in range(1, num_segments):
         shared = np.count_nonzero(np.logical_and(right_edges[i - 1], left_edges[i]))
         segments[i]['shared_with_prev'] = shared
 
@@ -595,3 +593,66 @@ def compute_mirrored_slice_geometry(segments: list[dict]) -> dict:
         'mirrored_slices': mirrored_slices
     }
 
+def float_to_filename_str(x: float) -> str:
+    """
+    Converts a float to a string suitable for filenames by replacing '.' with 'p'.
+
+    Example:
+        0.25 -> '0p25'
+        1.0  -> '1p0'
+    """
+    return str(x).replace('.', 'p')
+
+def flatten_cloud_metadata_for_csv(cloud_data_list):
+    """
+    Flattens cloud metadata into a list of dicts suitable for compact CSV storage.
+
+    CSV format overview:
+    - Each row corresponds to either:
+        • The full cloud geometry (slice_id = -1), or
+        • A single mirrored slice from that cloud.
+    - To minimize redundant data, full cloud values are stored in the same columns
+      as the per-slice data (e.g., 'mirrored_area', 'mirrored_perimeter'), even
+      though they technically refer to the full cloud.
+    - This allows us to reuse column names across all rows and keep the structure flat.
+
+    Conventions:
+    - slice_id = -1 indicates a row describing the full cloud geometry.
+        * 'mirrored_area' contains the full cloud's area
+        * 'mirrored_perimeter' contains the full cloud's perimeter
+        * 'exposed_edge_length' and 'slice_perimeter' are set to -1 as placeholders
+    - All other slice_id values (0, 1, 2, ...) represent individual mirrored slices.
+
+    Output columns:
+    - cloud_id: Unique ID for each cloud (based on list index)
+    - slice_id: -1 for full cloud, otherwise index of the mirrored slice
+    - mirrored_area: Area of the mirrored slice (or full cloud if slice_id = -1)
+    - mirrored_perimeter: Perimeter of the mirrored slice (or full cloud if slice_id = -1)
+    - exposed_edge_length: Length of the exposed edge in the original slice (or -1 for full cloud)
+    - slice_perimeter: Pre-mirroring perimeter of the slice (or -1 for full cloud)
+    """
+    flattened = []
+
+    for cloud_id, cloud in enumerate(cloud_data_list):
+        # Row for full cloud (slice_id = -1, fields reused for storage efficiency)
+        flattened.append({
+            "cloud_id": cloud_id,
+            "slice_id": -1,
+            "mirrored_area": cloud["full_area"],
+            "mirrored_perimeter": cloud["full_perimeter"],
+            "exposed_edge_length": -1,
+            "slice_perimeter": -1,
+        })
+
+        # Rows for each mirrored slice
+        for slice_data in cloud["mirrored_slices"]:
+            flattened.append({
+                "cloud_id": cloud_id,
+                "slice_id": slice_data["slice_id"],
+                "mirrored_area": slice_data["mirrored_area"],
+                "mirrored_perimeter": slice_data["mirrored_perimeter"],
+                "exposed_edge_length": slice_data["exposed_edge_length"],
+                "slice_perimeter": slice_data["slice_perimeter"],
+            })
+
+    return flattened
