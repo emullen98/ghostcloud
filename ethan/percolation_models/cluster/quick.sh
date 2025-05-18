@@ -1,0 +1,23 @@
+#!/bin/bash
+
+module load anaconda3/2024.06-Jun
+python sp_corr_func_combine.py '0.41'
+python sp_corr_func_combine.py '0.41474'
+python sp_corr_func_combine.py '0.41953'
+python sp_corr_func_combine.py '0.42438'
+python sp_corr_func_combine.py '0.42928'
+python sp_corr_func_combine.py '0.43424'
+python sp_corr_func_combine.py '0.43925'
+python sp_corr_func_combine.py '0.44433'
+python sp_corr_func_combine.py '0.44946'
+python sp_corr_func_combine.py '0.45466'
+python sp_corr_func_combine.py '0.45991'
+python sp_corr_func_combine.py '0.46522'
+python sp_corr_func_combine.py '0.4706'
+python sp_corr_func_combine.py '0.47603'
+python sp_corr_func_combine.py '0.48153'
+python sp_corr_func_combine.py '0.4871'
+python sp_corr_func_combine.py '0.49272'
+python sp_corr_func_combine.py '0.49842'
+python sp_corr_func_combine.py '0.50418'
+python sp_corr_func_combine.py '0.51'
