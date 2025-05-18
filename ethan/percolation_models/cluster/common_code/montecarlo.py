@@ -197,7 +197,7 @@ def find_pl_montecarlo(data, runs = 2000, pqcrit = 0.45, pcrit = 0.35, pruns = 1
     candidate runs, pruns are used to estimate the true p value [1]. The xmin/xmax are chosen as
     those that have p > pcrit and have the largest value of xmax/xmin.
     
-    TODO:
+    TO DO:
         --Work to derive a function for calculating 'fake' pq from AD value. Relies on quadratic statistics
         --Obtain method against biasing values of xmax that are too high
         --Obtain method for estimating confidence intervals on estimated xmin and xmax.
