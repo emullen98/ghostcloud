@@ -183,7 +183,7 @@ Plotting functions
 
 def cluster_area_dist(size=50, prob=0.381, num_runs=5, end_time=100, fig_loc=None):
     """
-    Makes a plot of the cluster area distribution at a fixed timestep.
+    Makes a plot of the in_cluster area distribution at a fixed timestep.
 
     Parameters
     ----------
@@ -196,7 +196,7 @@ def cluster_area_dist(size=50, prob=0.381, num_runs=5, end_time=100, fig_loc=Non
     num_runs : int, optional
         Number of runs to do averaging over
     end_time : int, optional
-        Timestep after which to end the simulation and compute the cluster area distribution
+        Timestep after which to end the simulation and compute the in_cluster area distribution
     fig_loc : str, optional
         Where to store the figure
 
@@ -225,7 +225,7 @@ def cluster_area_dist(size=50, prob=0.381, num_runs=5, end_time=100, fig_loc=Non
 
     histx, histy = ccdf(areas)
     max_size = max(areas)
-    plt.text(10**1, 10**(-3), f'Largest cluster = {max_size}')
+    plt.text(10**1, 10**(-3), f'Largest in_cluster = {max_size}')
     plt.semilogy(histx, histy, '.')
     plt.title(f'Runs: {num_runs}, Max timestep: {end_time}')
     plt.xlabel('cluster size (# of sites)')
@@ -252,7 +252,7 @@ def cluster_count_vs_time(size=50, prob=0.381, num_runs=5, scale='log', end_time
     scale : str, optional
         Axes scale ('log' or 'linear')
     end_times : arr, optional
-        Log-spaced timesteps after which to end the simulation and compute the cluster area distribution.
+        Log-spaced timesteps after which to end the simulation and compute the in_cluster area distribution.
         Default is 50 timesteps from 1 to 1,000.
     fig_loc : str, optional
         Where to store the figure
