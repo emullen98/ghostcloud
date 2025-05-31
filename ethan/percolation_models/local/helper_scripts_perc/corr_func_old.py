@@ -65,7 +65,7 @@ def corr_func_old(arr=None):
     :param arr: lattice as a numpy array.
     :return: [0] = unique distances in the provided array as a numpy array, [1] = correlation function as a numpy array.
     It is ordered and corresponds to the unique_distances array. Correlation function here is defined as the probability
-    that two sites a distance r apart are part of the same cluster.
+    that two sites a distance r apart are part of the same in_cluster.
     """
     if arr is None:
         print('Please input an array!')

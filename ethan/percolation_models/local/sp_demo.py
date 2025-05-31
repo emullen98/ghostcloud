@@ -30,7 +30,7 @@ lattice = np.random.choice([0, 1], size=(ly, lx), p=[1 - prob, prob])
 
 def get_perims_areas(arr):
     """
-    -- Gets cluster perimeters & areas for a lattice where clusters are labeled uniquely by nonzero integers.
+    -- Gets in_cluster perimeters & areas for a lattice where clusters are labeled uniquely by nonzero integers.
     -- I have checked this function's speed using site percolation lattices.
         -- For an array of linear size 10**3, using numba is disadvantageous.
         -- However, when the linear size is increased to 10**4, the speed up is ~30x with numba applied.
@@ -38,7 +38,7 @@ def get_perims_areas(arr):
     Parameters
     ----------
     arr : arr
-        Lattice to find cluster perimeters & areas for
+        Lattice to find in_cluster perimeters & areas for
 
     Returns
     -------
@@ -49,21 +49,21 @@ def get_perims_areas(arr):
     """
     lx, ly = arr.shape
 
-    cnum = arr.max()  # each cluster is labeled uniquely, so the largest label is the number of unique clusters.
+    cnum = arr.max()  # each in_cluster is labeled uniquely, so the largest label is the number of unique clusters.
 
     areas = np.zeros(cnum)
     perims = np.zeros(cnum)
 
     for i in range(lx):
         for j in range(ly):
-            idx = arr[i, j] - 1  # If we are at cluster label 5, then we want to add the area and perimeter of this cluster to the 5th entry in the areas/perims lists, which is index 4.
+            idx = arr[i, j] - 1  # If we are at in_cluster label 5, then we want to add the area and perimeter of this in_cluster to the 5th entry in the areas/perims lists, which is index 4.
 
             if idx >= 0:
-                if i == 0 or j == 0 or i == lx - 1 or j == ly - 1:  # If we are at a border site, set the area and perimeter for this cluster to a nan.
+                if i == 0 or j == 0 or i == lx - 1 or j == ly - 1:  # If we are at a border site, set the area and perimeter for this in_cluster to a nan.
                     areas[idx] = np.nan
                     perims[idx] = np.nan
                 else:
-                    if (not np.isnan(areas[idx])) and (not np.isnan(perims[idx])):  # If we are at an interior site, get the area and perimeter contribution to this site's cluster.
+                    if (not np.isnan(areas[idx])) and (not np.isnan(perims[idx])):  # If we are at an interior site, get the area and perimeter contribution to this site's in_cluster.
                         areas[idx] = areas[idx] + 1
                         perims[idx] = perims[idx] + int(arr[i + 1, j] == 0) + int(arr[i - 1, j] == 0) + int(arr[i, j + 1] == 0) + int(arr[i, j - 1] == 0)
 

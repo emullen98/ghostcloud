@@ -14,7 +14,7 @@ def make_lattice(size=100, p=0.381, end_time=7, fill_holes=True, include_diags=F
     :param p: bond probability
     :param end_time: how many timesteps to evolve the system by
     :param fill_holes: whether to flood fill the clusters
-    :param include_diags: whether to include diagonal sites in a cluster
+    :param include_diags: whether to include diagonal sites in a in_cluster
     :return: [0] = lattice with uniquely labeled clusters, [1] = lattice that has been filled (returns just the evolved
     lattice if fill_holes is set to False), [2] = lattice after evolving without filling holes.
     """
