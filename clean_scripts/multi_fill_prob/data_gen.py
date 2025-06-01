@@ -1,10 +1,12 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../utils')))
 from cloud_utils import *
 import gzip
 from pathlib import Path
 import csv
-import sys
 
-OUT_DIR_PATH     = (sys.argv[1])        # Convert to Path object
+OUT_DIR_PATH     = (sys.argv[1])        
 LATTICE_SIZE     = int(sys.argv[2])
 FILL_PROB        = float(sys.argv[3])
 MIN_CLOUD_AREA   = int(sys.argv[4])
@@ -34,7 +36,7 @@ for cloud in cropped_clouds:
 flattened_data = flatten_cloud_metadata_for_csv(cloud_data)
 
 # then save list of dicts for all clouds in lattice given they have valid slices to a single csv file. 
-filename = OUT_DIR_PATH + "slice_data.csv.gz"
+filename = OUT_DIR_PATH + "/slice_data.csv.gz"
 filename = Path(filename)
 
 with gzip.open(filename, "wt", encoding="utf-8") as f:
