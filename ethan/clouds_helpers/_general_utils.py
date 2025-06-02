@@ -345,3 +345,42 @@ def find_nearest_logbin(area_bins: list | np.ndarray, perim_bins: list | np.ndar
     closest_perim_bin = perim_bins[idxs]
 
     return closest_perim_bin, closest_area_bin
+
+
+def linemaker(slope: float = None, intercept: list = None, xmin: float = None, xmax: float = None, ppd: int = 40) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns X and Y arrays of a power-law line
+
+    Parameters
+    ----------
+    slope : float, default=None
+        Power law PDF slope
+    intercept : list, default=None
+        Intercept of the line
+        Formatted as [x-val, y-val]
+    xmin : float, default=None
+        Minimum x-value the line will appear over
+    xmax : float, default=None
+        Maximum x-value the line will appear over
+    ppd : int, default=40
+        Number of log-spaced points per decade to evaluate the line at
+
+    Returns
+    -------
+    x_vals : np.ndarray 
+        X-values of the line
+    y_vals : np.ndarray 
+        Y-values of the line
+    """
+    if slope is None or intercept is None or xmin is None or xmax is None:
+        raise ValueError('Please enter slope, intercept, xmin and xmax.')
+
+    log_x_intercept, log_y_intercept = np.log10(intercept[0]), np.log10(intercept[1])
+    log_xmin, log_xmax = np.log10(xmin), np.log10(xmax)
+
+    log_b = log_y_intercept - slope * log_x_intercept  # Calculate the y-intercept of the line on log axes
+
+    x_vals = np.logspace(log_xmin, log_xmax, round(ppd * (log_xmax - log_xmin)))  # Get the x- and y-values of the line as arrays
+    y_vals = (10 ** log_b) * (x_vals ** slope)
+
+    return x_vals, y_vals

@@ -16,8 +16,6 @@ from scipy.ndimage import label, binary_fill_holes
 from collections import Counter
 import clouds_helpers
 
-print(help(clouds_helpers.get_corr_func))
-
 """
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 Initialize things
