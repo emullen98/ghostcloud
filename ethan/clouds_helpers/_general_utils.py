@@ -1,10 +1,12 @@
 """
 Created May 31 2025
-Updated May 31 2025
+Updated Jun 01 2025
 
 (IN CLUSTER)
 General utility functions for clouds project
 """
+import os
+import sys
 import numpy as np
 from numba import set_num_threads, njit, prange
 from numba.typed import List
@@ -212,6 +214,19 @@ def _get_pa_core(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 These functions SHOULD be called directly
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 """
+
+
+def get_pwd() -> str:
+    """
+    Gets the absolute path to the currently running script
+    
+    See http://www.faqs.org/docs/diveintopython/regression_path.html for more
+
+    Returns
+    -------
+    Absolute path (see above description)
+    """
+    return os.path.abspath(os.path.dirname(sys.argv[0]))
 
 
 def set_thread_count(threads: int) -> None:

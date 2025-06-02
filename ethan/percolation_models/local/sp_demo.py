@@ -14,6 +14,9 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 from scipy.ndimage import label, binary_fill_holes
 from collections import Counter
+import clouds_helpers
+
+print(help(clouds_helpers.get_corr_func))
 
 """
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -115,7 +118,7 @@ ax13.set_aspect('equal')
 ax13.invert_yaxis()
 ax13.set_title('4 largest clusters \n after flood fill')
 fig1.suptitle(f'Lattice of random 0s and 1s, Pr ~ (1) = {prob}', fontsize='xx-large')
-fig1.savefig(f'{fig_loc}/random_sites_p={prob}.png')
+# fig1.savefig(f'{fig_loc}/random_sites_p={prob}.png')
 
 """
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -124,7 +127,7 @@ Figure 2: Perimeter vs. area scatter plot
 """
 
 p, a = get_perims_areas(labeled_array)
-print(np.nanmin(a))
+# print(np.nanmin(a))
 
 # fig2, ax2 = plt.subplots(1, 1, constrained_layout=True)
 # ax2.scatter(a, p)

@@ -2,14 +2,12 @@
 Created May 20 2025
 Updated May 20 2025
 
-Show that the downsampling technique for the correlation function does an excellent job of preserving its structure
+Show downsampling effect on the pair correlation function
 
 Creates a site percolation lattice at the percolation threshold (p_c = 0.5927...)
 
 Computes the correlation function in two ways: one with no downsampling, the other with downsampling
 """
-
-
 import numpy as np
 from matplotlib import pyplot as plt
 from numba import njit, prange

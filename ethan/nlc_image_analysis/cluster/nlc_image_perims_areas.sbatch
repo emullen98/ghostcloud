@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#SBATCH --array=1-404%40
+#SBATCH --array=1-284%40
 #SBATCH --mem=32G
 #SBATCH -t 4:00:00
 #SBATCH -J cloud_perims_areas_%A
@@ -15,7 +15,7 @@
 
 module load anaconda3/2024.10
 
-fill_holes="True"
 thread_count=1
 
-python nlc_image_perim_areas.py "$SLURM_ARRAY_TASK_ID" "$fill_holes" "$thread_count"
+export PYTHONPATH='/projects/illinois/eng/physics/dahmen/mullen/helper_modules':$PYTHONPATH
+python nlc_image_perims_areas.py "$SLURM_ARRAY_TASK_ID" "$thread_count"

@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-#SBATCH --array=1-404%40
+#SBATCH --array=1-284%40
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=32G
-#SBATCH -t 24:00:00
+#SBATCH -t 72:00:00
 #SBATCH -J cloud_corr_func_%A
 #SBATCH --account=dahmen-ic
 #SBATCH -p IllinoisComputes
@@ -19,8 +19,7 @@ module load anaconda3/2024.10
 
 fill_holes="True"
 frac=0.01
-thresh_min=1
-thresh_max=100
 thread_count=32
 
-python nlc_image_corr_funcs.py "$SLURM_ARRAY_TASK_ID" "$fill_holes" "$frac" "$thresh_min" "$thresh_max" "$thread_count"
+export PYTHONPATH='/projects/illinois/eng/physics/dahmen/mullen/helper_modules':$PYTHONPATH
+python nlc_image_corr_funcs.py "$SLURM_ARRAY_TASK_ID" "$fill_holes" "$frac" "$thread_count"

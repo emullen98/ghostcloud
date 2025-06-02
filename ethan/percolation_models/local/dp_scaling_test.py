@@ -1,21 +1,21 @@
 """
 Created Apr 10 2025
-Updated Apr 10 2025
+Updated Jun 01 2025
 
--- Creates various plots for checking that my DP implementation exhibits known scaling laws.
--- Designed to be a stand-alone script, i.e., all necessary functions are present if they aren't imported from a
-package.
--- First set of functions are purely helper functions.
+Creates various plots for checking that my DP implementation exhibits known scaling laws
+
+Designed to be a stand-alone script, i.e., all necessary functions are present if they aren't imported from a
+package
+
+First set of functions are purely helper functions
 """
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import label, find_objects
 
-"""
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-Helper functions
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-"""
+# ============================
+# Section: Helper functions
+# ============================
 
 
 def timestep(slices, prob, lx, ly):
@@ -174,11 +174,9 @@ def ccdf(data, method='exclusive'):
     return histx, histy
 
 
-"""
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-Plotting functions
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-"""
+# ============================
+# Section: Main plotting functions
+# ============================
 
 
 def cluster_area_dist(size=50, prob=0.381, num_runs=5, end_time=100, fig_loc=None):
@@ -432,7 +430,7 @@ def density_compare(size=50, num_runs=2, probs=None, times=None, fig_loc=None):
     return 'temp'
 
 
-def survProb(size=500, prob=0.382223, num_runs=100, fig_loc=None):
+def surv_prob(size=500, prob=0.382223, num_runs=100, fig_loc=None):
     """
     Plots a histogram of single-seeded DP survival lifetimes.
 

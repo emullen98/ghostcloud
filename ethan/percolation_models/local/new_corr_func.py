@@ -1,3 +1,9 @@
+"""
+Created May xx 2025
+Updated Jun 01 2025
+
+Tinker with new correlation function method
+"""
 import time
 import numpy as np
 from numba import njit, prange
