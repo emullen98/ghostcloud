@@ -1,6 +1,6 @@
 """
 Created May 31 2025
-Updated Jun 01 2025
+Updated Jun 02 2025
 
 (IN CLUSTER)
 General utility functions for clouds project
@@ -10,6 +10,7 @@ import sys
 import numpy as np
 from numba import set_num_threads, njit, prange
 from numba.typed import List
+import scipy
 from scipy.ndimage import find_objects
 
 
@@ -209,6 +210,56 @@ def _get_pa_core(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return perims, areas
 
 
+@njit(parallel=True)
+def _logbinning_core(unsorted_x: np.ndarray, unsorted_y: np.ndarray, num_bins: int, error_type: str = 'SEM') -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    # Define outputs
+    centers = np.zeros(num_bins)
+    errs = np.zeros(num_bins)
+    out = np.zeros(num_bins)
+
+    unsorted_y = unsorted_y[unsorted_x > 0]
+    unsorted_x = unsorted_x[unsorted_x > 0]
+
+    idxs = np.argsort(unsorted_x)
+
+    # Organize by first index
+    x = unsorted_x[idxs]
+    y = unsorted_y[idxs]
+
+    logmax = np.log10(x[-1])
+    logmin = np.log10(x[0])
+
+    edges = np.logspace(logmin, logmax, num_bins + 1)
+    edgeidxs = np.zeros(num_bins + 1)
+
+    for i in range(num_bins + 1):
+        tmp = np.abs(x - edges[i])
+        # Find minimimum from https://stackoverflow.com/questions/2566412/find-nearest-value-in-numpy-array
+        edgeidxs[i] = tmp.argmin()
+
+    # Get centers
+    dx = (logmax-logmin)/num_bins
+    centers = np.logspace(logmin + dx, logmax - dx, num_bins)
+
+    # Get means
+    for i in range(num_bins):
+        st = int(edgeidxs[i])
+        en = int(edgeidxs[i + 1])
+        
+        # Add 1 to take into account when start and end are same index
+        en = en + int(st == en)
+        vals = y[st:en]
+        out[i] = np.mean(vals)
+        if error_type == 'SEM':
+            # SEM = std(X) / sqrt(N). N = en - st.
+            errs[i] = np.std(vals) / np.sqrt(en - st)
+        else:
+            # Standard error = std(X)
+            errs[i] = np.std(vals)
+        
+    return centers, out, errs
+
+
 """
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 These functions SHOULD be called directly
@@ -298,7 +349,7 @@ def get_perimeters_areas(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     Parameters
     ----------
     arr : np.ndarray
-        Cloud image (as an array) to get perimeters & areas for
+        Cloud image (as an array of integers) to get perimeters & areas for
 
     Returns
     -------
@@ -307,6 +358,10 @@ def get_perimeters_areas(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     areas : np.ndarray
         Array of cloud areas
     """
+    # Any dtype like np.int8, np.int16, np.int32, np.int64 is fine
+    if not np.issubdtype(arr.dtype, np.integer):
+        raise TypeError("Input array must contain integers only!")
+        
     lx, ly = arr.shape
 
     if lx * ly > 10**8:
@@ -384,3 +439,43 @@ def linemaker(slope: float = None, intercept: list = None, xmin: float = None, x
     y_vals = (10 ** log_b) * (x_vals ** slope)
 
     return x_vals, y_vals
+
+
+def logbinning(unsorted_x: np.ndarray, unsorted_y: np.ndarray, num_bins: int, error_type: str = 'SEM', ci: float = 0.68) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Logarithmically bin input data
+    
+    Generally, prefer to use standard error of the mean (SEM) because the error bar should describe how much the average value would change when binning data together on a logarithmic bin
+    
+    Report 95% CI using Z-scores
+    
+    Parameters
+    ----------
+    unsorted_x : np.ndarray
+        X-values of data
+    unsorted_y : np.ndarray
+        Y-values of data
+    num_bins : int
+        Number of logarithmic bins to place data into
+    error_type : str, default='SEM'
+        How to compute the errors in each bin
+        Options:
+            'SEM' : Standard error of the mean
+            {str} : Any other string uses standard deviation
+    ci : float, default=0.68
+        Confidence interval as a fraction of 100
+        For example, a 68% confidence interval is 0.68
+
+    Returns
+    -------
+    centers : np.ndarray
+        Bin X-values
+    out : np.ndarray
+        Bin Y-values
+    errs : np.ndarray
+        Errors on bin Y-values multiplied by Z-score
+    """    
+    centers, out, errs = _logbinning_core(unsorted_x, unsorted_y, num_bins, error_type=error_type)
+    z = np.sqrt(2) * scipy.stats.norm.ppf((1 + ci) / 2)
+
+    return centers, out, errs * z
