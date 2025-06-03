@@ -1,28 +1,12 @@
+"""
+Created Jun 01 2025
+Updated Jun 02 2025
+
+Computes the diagonal correlation function for a 2D correlated field
+"""
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.special import gamma, kv
-from clouds_helpers import linemaker
-
-
-def compute_2d_spectral_density(q, gamma_exp):
-    beta = (gamma_exp - 2) / 2
-    q = np.where(q == 0, 1e-10, q)
-    prefactor = (2 * np.pi) / gamma(beta + 1)
-    S_q = prefactor * (q / 2)**beta * kv(beta, q)
-    return np.nan_to_num(np.real(S_q), nan=0.0, posinf=0.0, neginf=0.0)
-
-
-def generate_correlated_field(L, gamma_exp, seed=None):
-    if seed is not None:
-        np.random.seed(seed)
-    kx = np.fft.fftfreq(L).reshape(-1, 1)
-    ky = np.fft.fftfreq(L).reshape(1, -1)
-    q = np.sqrt(kx**2 + ky**2)
-    S_q = compute_2d_spectral_density(q, gamma_exp)
-    noise = np.random.normal(0, 1, (L, L)) + 1j * np.random.normal(0, 1, (L, L))
-    hq = np.fft.fftn(noise) * np.sqrt(S_q)
-    field = np.real(np.fft.ifftn(hq))
-    return field
+from clouds_helpers import linemaker, generate_2d_correlated_field
 
 
 def compute_spatial_diagonal_correlation(field):
@@ -51,7 +35,7 @@ def estimate_correlations(L=211, gamma_list=[0.4, 0.8, 1.2, 1.6], n_samples=50):
         print(f"Computing for γ = {gamma_val}")
         acc_corr = np.zeros_like(lag_axis, dtype=float)
         for seed in range(n_samples):
-            field = generate_correlated_field(L, gamma_val, seed)
+            field = generate_2d_correlated_field(L, gamma_val, unit_normalize=False, seed=seed)
             corr = compute_spatial_diagonal_correlation(field)
             acc_corr += corr
         acc_corr /= n_samples
