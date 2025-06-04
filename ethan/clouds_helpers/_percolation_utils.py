@@ -1,6 +1,6 @@
 """
 Created May 27 2025
-Updated Jun 02 2025
+Updated Jun 04 2025
 
 Utility functions for working with percolation models in the cluster
 """
@@ -43,6 +43,88 @@ def _compute_2d_spectral_density(q: np.ndarray, gamma_exp: float) -> np.ndarray:
 # ============================
 # These functions SHOULD be called directly
 # ============================
+
+
+def fill_and_label_lattice(arr: np.ndarray, rem_border_clusters: bool) -> tuple[np.ndarray, int]:
+    """
+    Fills and labels an input lattice
+
+    Parameters
+    ----------
+    arr : ndarray
+        Input lattice
+    rem_border_clusters : bool
+        Whether to remove clusters that touch the boundary of the lattice
+
+    Returns
+    -------
+    labeled_filled_lattice : ndarray of ints
+        Labeled & filled version of input lattice
+    num_features : int
+        Number of clusters after filling & labeling the lattice
+    """
+    my_arr = binary_fill_holes(arr)
+
+    if rem_border_clusters:
+        labeled_filled_lattice, _ = label(my_arr)  # Number of features needs to be calculated AFTER removing boundary-touching clusters, if applicable
+
+        t_row = labeled_filled_lattice[0, :]
+        b_row = labeled_filled_lattice[-1, :]
+        l_col = labeled_filled_lattice[:, 0]
+        r_col = labeled_filled_lattice[:, -1]
+
+        unique_border_labels = np.unique(np.concatenate((t_row, b_row, l_col, r_col)))
+        unique_border_labels = unique_border_labels[unique_border_labels > 0]
+
+        mask = np.isin(labeled_filled_lattice, unique_border_labels)
+        labeled_filled_lattice[mask] = 0
+
+        labeled_filled_lattice = (labeled_filled_lattice > 0).astype(int)
+        labeled_filled_lattice, num_features = label(labeled_filled_lattice)
+    else:
+        labeled_filled_lattice, num_features = label(my_arr)
+
+    return labeled_filled_lattice, num_features
+
+
+def label_lattice(arr: np.ndarray, rem_border_clusters: bool) -> tuple[np.ndarray, int]:
+    """
+    Labels (but does not fill) an input lattice
+
+    Parameters
+    ----------
+    arr : ndarray
+        Input lattice
+    rem_border_clouds : bool
+        Whether to remove clusters that touch the boundary of the lattice
+
+    Returns
+    -------
+    labeled_binary_lattice : np.ndarray
+        Labeled version of lattice
+    num_features : int
+        Number of clusters after labeling the lattice
+    """
+    if rem_border_clusters:
+        labeled_lattice, _ = label(arr)
+
+        t_row = labeled_lattice[0, :]
+        b_row = labeled_lattice[-1, :]
+        l_col = labeled_lattice[:, 0]
+        r_col = labeled_lattice[:, -1]
+
+        unique_border_labels = np.unique(np.concatenate((t_row, b_row, l_col, r_col)))
+        unique_border_labels = unique_border_labels[unique_border_labels > 0]
+
+        mask = np.isin(labeled_lattice, unique_border_labels)
+        labeled_lattice[mask] = 0
+
+        labeled_lattice = (labeled_lattice > 0).astype(int)
+        labeled_lattice, num_features = label(labeled_lattice)
+    else:
+        labeled_lattice, num_features = label(arr)
+
+    return labeled_lattice, num_features
 
 
 def timestep_dp(arr: np.ndarray, prob: float, lx: int, ly: int) -> np.ndarray:
