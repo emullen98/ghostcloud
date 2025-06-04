@@ -1,6 +1,6 @@
 """
 Created May 31 2025
-Updated Jun 02 2025
+Updated Jun 04 2025
 """
 from ._general_utils import set_thread_count
 from ._general_utils import get_corr_func
@@ -15,3 +15,5 @@ from ._nlc_image_utils import label_image
 from ._percolation_utils import timestep_dp
 from ._percolation_utils import make_lattice_dp 
 from ._percolation_utils import generate_2d_correlated_field
+from ._percolation_utils import fill_and_label_lattice
+from ._percolation_utils import label_lattice
