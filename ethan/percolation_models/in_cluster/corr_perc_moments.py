@@ -17,7 +17,7 @@ threads = int(sys.argv[4])
 
 save_loc = f'/projects/illinois/eng/physics/dahmen/mullen/Clouds/correlated_percolation/perc_thresh_estimates/gamma={gamma:.1f}'
 
-thresholds = np.array([0.480, 0.482, 0.484, 0.486, 0.488, 0.490, 0.492, 0.494, 0.496, 0.498, 0.500, 0.502, 0.504, 0.506, 0.508, 0.510])
+thresholds = np.array([0.470, 0.472, 0.474, 0.476, 0.478, 0.480, 0.482, 0.484, 0.486, 0.488, 0.490, 0.492, 0.494, 0.496, 0.498, 0.500, 0.502, 0.504, 0.506, 0.508, 0.510])
 
 
 def compute_second_moment_for_threshold(i):
@@ -36,4 +36,6 @@ moments = Parallel(n_jobs=threads)(
     delayed(compute_second_moment_for_threshold)(i) for i in range(len(thresholds))
 )
 
-np.save(f'{save_loc}/moments_gamma={gamma:.1f}_minthresh={min(thresholds):.3f}_maxthresh={max(thresholds):.3f}_taskid={task_id}.npy', np.array(moments))
+moments = np.array(moments)
+
+np.save(f'{save_loc}/moments_{L}_{gamma:.1f}_{min(thresholds):.3f}_{max(thresholds):.3f}_task{task_id}.npy', np.array([thresholds, moments]))

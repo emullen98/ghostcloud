@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #SBATCH --array=1-500%40
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=21
 #SBATCH -t 4:00:00
 #SBATCH -J corr_perc_moments_%A
 #SBATCH -p secondary
@@ -15,9 +15,9 @@
 
 module load anaconda3/2024.10
 
-linear_size=2048
+linear_size=8192
 gamma=2
-threads=16
+threads=21
 
 export PYTHONPATH='/projects/illinois/eng/physics/dahmen/mullen/helper_modules':$PYTHONPATH
 python corr_perc_moments.py "$SLURM_ARRAY_TASK_ID" "$linear_size" "$gamma" "$threads"
