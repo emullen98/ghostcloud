@@ -20,4 +20,4 @@ gamma=2
 threads=16
 
 export PYTHONPATH='/projects/illinois/eng/physics/dahmen/mullen/helper_modules':$PYTHONPATH
-python corr_perc_moments.py "$SLURM_ARRAY_TASK_ID" "$linear_size" "$gamma" "$thread_count"
+python corr_perc_moments.py "$SLURM_ARRAY_TASK_ID" "$linear_size" "$gamma" "$threads"
