@@ -1,6 +1,6 @@
 """
 Created May 27 2025
-Updated Jun 04 2025
+Updated Jun 08 2025
 
 Utility functions for working with percolation models in the cluster
 """
@@ -162,15 +162,20 @@ def make_lattice_dp(size: int = 100, p: float = 0.381, end_time: int = 7, fill_h
 
     Parameters
     ----------
-    size : int, default=100
+    size : int, optional
         Linear system size
-    p : float, default=0.381
+        Default is 100
+    p : float, optional
         Bond probability
-    end_time : int, default=7
+        Default is 0.381
+    end_time : int, optional
         Number of times to evolve the lattice
-    fill_holes : bool, default=True
-    include_diags : bool, default=True
+        Default is 7
+    fill_holes : bool, optional
+        Default is True
+    include_diags : bool, optional
         Gives the labeling procedure (i.e., the convolution operation) an 8-connected structure if set to True
+        Default is False
 
     Returns
     -------
