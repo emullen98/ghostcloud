@@ -1,6 +1,6 @@
 """
 Created May 31 2025
-Updated Jun 02 2025
+Updated Jun 08 2025
 
 (IN CLUSTER)
 General utility functions for clouds project
@@ -408,17 +408,22 @@ def linemaker(slope: float = None, intercept: list = None, xmin: float = None, x
 
     Parameters
     ----------
-    slope : float, default=None
+    slope : float, optional
         Power law PDF slope
-    intercept : list, default=None
+        Default is None
+    intercept : list, optional
         Intercept of the line
         Formatted as [x-val, y-val]
-    xmin : float, default=None
+        Defaukt is None
+    xmin : float, optional
         Minimum x-value the line will appear over
-    xmax : float, default=None
+        Default is None
+    xmax : float, optional
         Maximum x-value the line will appear over
-    ppd : int, default=40
+        Default is None
+    ppd : int, optional
         Number of log-spaced points per decade to evaluate the line at
+        Default is 40
 
     Returns
     -------
@@ -457,14 +462,15 @@ def logbinning(unsorted_x: np.ndarray, unsorted_y: np.ndarray, num_bins: int, er
         Y-values of data
     num_bins : int
         Number of logarithmic bins to place data into
-    error_type : str, default='SEM'
+    error_type : str, optional
         How to compute the errors in each bin
         Options:
-            'SEM' : Standard error of the mean
+            'SEM' : (Default) Standard error of the mean
             {str} : Any other string uses standard deviation
-    ci : float, default=0.68
+    ci : float, optional
         Confidence interval as a fraction of 100
         For example, a 68% confidence interval is 0.68
+        Default is 0.68
 
     Returns
     -------
