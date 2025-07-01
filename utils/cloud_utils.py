@@ -3,6 +3,8 @@ from scipy.ndimage import binary_fill_holes, label, find_objects, convolve
 import os
 import warnings
 from typing import Union
+from scipy.special import gamma, kv
+from scipy.fftpack import fftn, ifftn
 
 def generate_site_percolation_lattice(width: int, height: int, fill_prob: float) -> np.ndarray:
     """
@@ -656,3 +658,77 @@ def flatten_cloud_metadata_for_csv(cloud_data_list):
             })
 
     return flattened
+
+def _compute_2d_spectral_density(q: np.ndarray, gamma_exp: float) -> np.ndarray:
+    """
+    Compute the 2D spectral density S(q) for a given wavenumber array and correlation exponent.
+
+    This function is used in the generation of correlated percolation fields.
+    It computes the spectral density S(q) as a function of the wavenumber magnitude q
+    and the correlation exponent gamma_exp, using a formula involving the modified Bessel function.
+
+    Parameters
+    ----------
+    q : np.ndarray
+        2D array of wavenumber magnitudes (typically from np.fft.fftfreq).
+    gamma_exp : float
+        Correlation exponent (gamma) controlling the spatial correlation.
+
+    Returns
+    -------
+    np.ndarray
+        2D array of real spectral density values S(q), same shape as q.
+        NaNs and infinities are replaced with zeros.
+    """
+    beta = (gamma_exp - 2) / 2
+    q = np.where(q == 0, 1e-10, q)
+    prefactor = (2 * np.pi) / gamma(beta + 1)
+    S_q = prefactor * (q / 2) ** beta * kv(beta, q)
+    return np.nan_to_num(np.real(S_q), nan=0.0, posinf=0.0, neginf=0.0)
+
+def generate_correlated_percolation_lattice(
+    width: int,
+    height: int,
+    gamma_exp: float,
+    p_val: float,
+    seed: int = None
+) -> np.ndarray:
+    """
+    Generate a binary correlated percolation lattice.
+
+    Each site is filled (True) if the correlated field value is below p_val.
+    The result is a 2D boolean NumPy array where True indicates a filled site.
+
+    Parameters:
+    ----------
+    width : int
+        Number of columns in the lattice.
+    height : int
+        Number of rows in the lattice.
+    gamma_exp : float
+        Correlation exponent for the field.
+    p_val : float
+        Threshold for filling sites.
+    seed : int, optional
+        Random seed.
+
+    Returns:
+    -------
+    np.ndarray
+        A (height x width) boolean array (dtype=bool) representing the lattice.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    L = max(width, height)
+    kx = np.fft.fftfreq(width).reshape(-1, 1)
+    ky = np.fft.fftfreq(height).reshape(1, -1)
+    q2 = kx**2 + ky**2
+    q = np.sqrt(q2)
+    q[0, 0] = 1e-10  # avoid division by zero
+    S_q = _compute_2d_spectral_density(q, gamma_exp)
+    noise = np.random.normal(0, 1, (height, width)) + 1j * np.random.normal(0, 1, (height, width))
+    hq = fftn(noise) * np.sqrt(S_q)
+    field = np.real(ifftn(hq))
+    field -= np.min(field)
+    field /= np.max(field)
+    return (field < p_val).astype(np.bool_)
