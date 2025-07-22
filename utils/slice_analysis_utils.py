@@ -17,17 +17,17 @@ def stream_slice_data_for_id(
 ) -> Iterator[Tuple[float, float]]:
     """
     Yields (area, perimeter) for a given slice_id across all lattice CSVs.
-    Handles both fill_prob_dir and single lattice_run dirs.
+    Handles both fill_prob_dir and single run dirs.
     """
     slice_id_str = str(slice_id)
 
-    # Determine if we're given a single lattice_run dir or a full fill_prob dir
+    # Determine if we're given a single run dir or a full fill_prob dir
     if (fill_prob_dir / "slice_data.csv.gz").exists():
         lattice_dirs = [fill_prob_dir]
     else:
-        lattice_dirs = sorted(fill_prob_dir.glob("lattice_run_*"))
+        lattice_dirs = sorted(fill_prob_dir.glob("run_*"))
         if not lattice_dirs:
-            print(f"[ERROR] No lattice_run_* dirs found in {fill_prob_dir}")
+            print(f"[ERROR] No run_* dirs found in {fill_prob_dir}")
             return
 
     file_count = 0
@@ -70,17 +70,17 @@ def stream_slice_data_for_id(
 ) -> Iterator[Tuple[float, float]]:
     """
     Yields (area, perimeter) for a given slice_id across all lattice CSVs.
-    Handles both fill_prob_dir and single lattice_run dirs.
+    Handles both fill_prob_dir and single run dirs.
     """
     slice_id_str = str(slice_id)
 
-    # Determine if we're given a single lattice_run dir or a full fill_prob dir
+    # Determine if we're given a single run dir or a full fill_prob dir
     if (fill_prob_dir / "slice_data.csv.gz").exists():
         lattice_dirs = [fill_prob_dir]
     else:
-        lattice_dirs = sorted(fill_prob_dir.glob("lattice_run_*"))
+        lattice_dirs = sorted(fill_prob_dir.glob("run_*"))
         if not lattice_dirs:
-            print(f"[ERROR] No lattice_run_* dirs found in {fill_prob_dir}")
+            print(f"[ERROR] No run_* dirs found in {fill_prob_dir}")
             return
 
     file_count = 0
@@ -123,17 +123,17 @@ def stream_cut_edge_vs_half_perim_for_id(
 ) -> Iterator[Tuple[float, float]]:
     """
     Yields (cut_edge_length, pre_mirror_perimeter / 2) for a given slice_id
-    across all lattice CSVs. Compatible with fill_prob_dir or single lattice_run_* dir.
+    across all lattice CSVs. Compatible with fill_prob_dir or single run_* dir.
     """
     slice_id_str = str(slice_id)
 
-    # Determine if we're given a single lattice_run dir or a full fill_prob dir
+    # Determine if we're given a single run dir or a full fill_prob dir
     if (fill_prob_dir / "slice_data.csv.gz").exists():
         lattice_dirs = [fill_prob_dir]
     else:
-        lattice_dirs = sorted(fill_prob_dir.glob("lattice_run_*"))
+        lattice_dirs = sorted(fill_prob_dir.glob("run_*"))
         if not lattice_dirs:
-            print(f"[ERROR] No lattice_run_* dirs found in {fill_prob_dir}")
+            print(f"[ERROR] No run_* dirs found in {fill_prob_dir}")
             return
 
     file_count = 0
@@ -180,6 +180,18 @@ def filter_max_area(
     """
     for area, perim in data:
         if area <= max_area:
+            yield area, perim
+
+def filter_min_area(
+    data: Iterator[Tuple[float, float]],
+    min_area: float
+) -> Iterator[Tuple[float, float]]:
+    """
+    Filters out clouds with area < min_area.
+    Returns same (area, perimeter) tuple stream.
+    """
+    for area, perim in data:
+        if area >= min_area:
             yield area, perim
 
 def convert_to_log_values(

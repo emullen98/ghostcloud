@@ -659,33 +659,6 @@ def flatten_cloud_metadata_for_csv(cloud_data_list):
 
     return flattened
 
-def _compute_2d_spectral_density(q: np.ndarray, gamma_exp: float) -> np.ndarray:
-    """
-    Compute the 2D spectral density S(q) for a given wavenumber array and correlation exponent.
-
-    This function is used in the generation of correlated percolation fields.
-    It computes the spectral density S(q) as a function of the wavenumber magnitude q
-    and the correlation exponent gamma_exp, using a formula involving the modified Bessel function.
-
-    Parameters
-    ----------
-    q : np.ndarray
-        2D array of wavenumber magnitudes (typically from np.fft.fftfreq).
-    gamma_exp : float
-        Correlation exponent (gamma) controlling the spatial correlation.
-
-    Returns
-    -------
-    np.ndarray
-        2D array of real spectral density values S(q), same shape as q.
-        NaNs and infinities are replaced with zeros.
-    """
-    beta = (gamma_exp - 2) / 2
-    q = np.where(q == 0, 1e-10, q)
-    prefactor = (2 * np.pi) / gamma(beta + 1)
-    S_q = prefactor * (q / 2) ** beta * kv(beta, q)
-    return np.nan_to_num(np.real(S_q), nan=0.0, posinf=0.0, neginf=0.0)
-
 def generate_correlated_percolation_lattice(
     width: int,
     height: int,
@@ -732,3 +705,148 @@ def generate_correlated_percolation_lattice(
     field -= np.min(field)
     field /= np.max(field)
     return (field < p_val).astype(np.bool_)
+
+def _compute_2d_spectral_density(q: np.ndarray, gamma_exp: float) -> np.ndarray:
+    """
+    Compute the 2D spectral density S(q) for a given wavenumber array and correlation exponent.
+
+    This function is used in the generation of correlated percolation fields.
+    It computes the spectral density S(q) as a function of the wavenumber magnitude q
+    and the correlation exponent gamma_exp, using a formula involving the modified Bessel function.
+
+    Optimized: Preserves original comments, no changes needed here.
+
+    Parameters
+    ----------
+    q : np.ndarray
+        2D array of wavenumber magnitudes (typically from np.fft.fftfreq).
+    gamma_exp : float
+        Correlation exponent (gamma) controlling the spatial correlation.
+
+    Returns
+    -------
+    np.ndarray
+        2D array of real spectral density values S(q), same shape as q.
+        NaNs and infinities are replaced with zeros.
+    """
+    beta = (gamma_exp - 2) / 2
+    q = np.where(q == 0, 1e-10, q)
+    prefactor = (2 * np.pi) / gamma(beta + 1)
+    S_q = prefactor * (q / 2) ** beta * kv(beta, q)
+    return np.nan_to_num(np.real(S_q), nan=0.0, posinf=0.0, neginf=0.0)
+
+
+import numpy as np
+from scipy.fft import rfft2, irfft2
+from scipy.special import kv, gamma
+import gc
+
+def _compute_2d_spectral_density_packed(qx: np.ndarray, qy: np.ndarray, gamma_exp: float) -> np.ndarray:
+    """
+    Compute the 2D spectral density S(q) in packed form for rfft2.
+
+    Parameters
+    ----------
+    qx : np.ndarray
+        1D array of frequencies along x (width direction).
+    qy : np.ndarray
+        1D array of frequencies along y (height direction).
+    gamma_exp : float
+        Correlation exponent (gamma) controlling the spatial correlation.
+
+    Returns
+    -------
+    np.ndarray
+        2D array of real spectral density values (height x (width//2 + 1)).
+    """
+    kx = qx.reshape(-1, 1)  # column vector
+    ky = qy.reshape(1, -1)  # row vector
+    q2 = kx**2 + ky**2
+    q = np.sqrt(q2)
+    q[0, 0] = 1e-10  # avoid division by zero
+
+    beta = (gamma_exp - 2) / 2
+    prefactor = (2 * np.pi) / gamma(beta + 1)
+    S_q = prefactor * (q / 2) ** beta * kv(beta, q)
+
+    return np.nan_to_num(np.real(S_q), nan=0.0, posinf=0.0, neginf=0.0)
+
+def generate_correlated_percolation_lattice_optimized(
+    width: int,
+    height: int,
+    gamma_exp: float,
+    p_val: float,
+    seed: int = None
+) -> np.ndarray:
+    """
+    Generate a binary correlated percolation lattice (optimized rfft2 version).
+
+    This version uses only real noise, rfft2 packed representation to exploit Hermitian symmetry,
+    and explicit memory cleanup for reduced peak usage.
+
+    Parameters
+    ----------
+    width : int
+        Number of columns in the lattice.
+    height : int
+        Number of rows in the lattice.
+    gamma_exp : float
+        Correlation exponent for the field.
+    p_val : float
+        Threshold for filling sites.
+    seed : int, optional
+        Random seed.
+
+    Returns
+    -------
+    np.ndarray
+        A (height x width) boolean array (dtype=bool) representing the lattice.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    # Generate real noise
+    noise = np.random.normal(0, 1, (height, width))
+
+    # Compute rfft2 of noise (Hermitian symmetric packed)
+    hq = rfft2(noise)
+
+    # Delete noise to free memory
+    del noise
+    gc.collect()
+
+    # Create packed spectral density shape
+    qx = np.fft.fftfreq(height)
+    qy = np.fft.rfftfreq(width)
+
+    S_q = _compute_2d_spectral_density_packed(qx, qy, gamma_exp)
+
+    # Apply spectral filter in packed form
+    hq *= np.sqrt(S_q)
+
+    # Delete spectral density to free memory
+    del S_q
+    gc.collect()
+
+    # Inverse rfft2 to get real field
+    field = irfft2(hq, s=(height, width))
+
+    # Delete hq
+    del hq
+    gc.collect()
+
+    # In-place normalization
+    field_min = np.min(field)
+    field -= field_min
+    field_max = np.max(field)
+    if field_max != 0:
+        field /= field_max
+
+    # Threshold to create lattice
+    lattice = (field < p_val).astype(np.bool_)
+
+    # Delete field
+    del field
+    gc.collect()
+
+    return lattice
