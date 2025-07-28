@@ -9,7 +9,6 @@ from pathlib import Path
 from sklearn.linear_model import LinearRegression
 from filelock import FileLock
 
-# ✅ Import your helper functions exactly as before
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), '../utils')))
 from slice_analysis_utils import filter_min_area, convert_to_log_values
 

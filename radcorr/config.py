@@ -1,2 +1,0 @@
-USE_FLOAT_KERNELS = True
-USE_GPU = False
