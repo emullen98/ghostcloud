@@ -41,29 +41,30 @@ def generate_annulus_stack(
     radii: List[int]
 ) -> xp.ndarray:
     """
-    Generate a stack of centered circular boolean masks, one for each radius.
+    Generate a stack of centered circular **annular** boolean masks.
+
+    Each annulus includes points between radius r and r-1.
 
     Parameters:
         shape (Tuple[int, int]): Shape of the padded image (height, width).
-        radii (List[int]): List of integer radii for which to generate circular masks.
+        radii (List[int]): List of integer radii for which to generate annuli.
 
     Returns:
-        xp.ndarray: 3D boolean array of shape (len(radii), H, W), where each slice is a circular mask.
-                    Each mask has True inside a circle of radius `r` centered in the array.
+        xp.ndarray: 3D boolean array of shape (len(radii), H, W), each slice is an annular ring mask.
     """
     H, W = shape
     cy, cx = H // 2, W // 2
 
-    # Generate a distance-squared map once
     Y, X = xp.meshgrid(xp.arange(H), xp.arange(W), indexing='ij')
     dist_sq = (Y - cy)**2 + (X - cx)**2
 
-    # Allocate boolean mask stack
     masks = xp.zeros((len(radii), H, W), dtype=bool)
+    prev_r_sq = 0
 
     for i, r in enumerate(radii):
         r_sq = r**2
-        masks[i] = dist_sq <= r_sq  # Already a boolean mask
+        masks[i] = (dist_sq <= r_sq) & (dist_sq > prev_r_sq)
+        prev_r_sq = r_sq
 
     return masks
 
