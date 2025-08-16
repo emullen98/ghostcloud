@@ -6,7 +6,7 @@ from typing import Union
 from scipy.special import gamma, kv
 from scipy.fftpack import fftn, ifftn
 
-def generate_site_percolation_lattice(width: int, height: int, fill_prob: float) -> np.ndarray:
+def generate_site_percolation_lattice(width: int, height: int, fill_prob: float, seed: int = None) -> np.ndarray:
     """
     Generate a binary site percolation lattice.
 
@@ -24,13 +24,16 @@ def generate_site_percolation_lattice(width: int, height: int, fill_prob: float)
         Number of rows in the lattice.
     fill_prob : float
         Probability that a given site is filled (between 0 and 1).
+    seed : int 
+        Seed used for randomized lattice generation. Default is None, in which case no seed is specified.
 
     Returns:
     -------
     np.ndarray
         A (height x width) boolean array (dtype=bool) representing the lattice.
     """
-    return (np.random.rand(height, width) < fill_prob).astype(np.bool_)
+    rng = np.random.default_rng(seed)
+    return (rng.random((height, width)) < fill_prob).astype(np.bool_)
 
 def flood_fill_and_label_features(lattice: np.ndarray, connectivity: int = 1) -> tuple[np.ndarray, int]:
     """
@@ -690,8 +693,7 @@ def generate_correlated_percolation_lattice(
     np.ndarray
         A (height x width) boolean array (dtype=bool) representing the lattice.
     """
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     L = max(width, height)
     kx = np.fft.fftfreq(width).reshape(-1, 1)
     ky = np.fft.fftfreq(height).reshape(1, -1)
@@ -699,7 +701,7 @@ def generate_correlated_percolation_lattice(
     q = np.sqrt(q2)
     q[0, 0] = 1e-10  # avoid division by zero
     S_q = _compute_2d_spectral_density(q, gamma_exp)
-    noise = np.random.normal(0, 1, (height, width)) + 1j * np.random.normal(0, 1, (height, width))
+    noise = rng.normal(0, 1, (height, width)) + 1j * rng.normal(0, 1, (height, width))
     hq = fftn(noise) * np.sqrt(S_q)
     field = np.real(ifftn(hq))
     field -= np.min(field)
