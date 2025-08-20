@@ -291,7 +291,7 @@ def set_thread_count(threads: int) -> None:
     set_num_threads(threads)
 
 
-def get_corr_func(processed_lattice: np.ndarray, num_features: int, max_dist: int, frac: float):
+def get_corr_func(processed_lattice: np.ndarray, num_features: int, frac: float = 1.0) -> np.ndarray:
     """
     Wrapper function that takes in a preprocessed lattice and computes its correlation function g(r)
 
@@ -300,12 +300,10 @@ def get_corr_func(processed_lattice: np.ndarray, num_features: int, max_dist: in
     processed_lattice : np.ndarray
         Fully processed lattice
     num_features : int
-        Number of clouds
-    max_dist : int
-        Maximum Euclidean distance between points in the lattice
-        This is just the diagonal length rounded to the nearest integer
-    frac : float
+        Number of clouds; this should already be known from the preprocessing steps (i.e., the labelling step)
+    frac : float, optional
         Percentage of sites to visit for calculating the correlation function
+        Defaults to 1.0
 
     Returns
     -------
@@ -313,6 +311,8 @@ def get_corr_func(processed_lattice: np.ndarray, num_features: int, max_dist: in
         Pair-connectivity function g(r) starting from r = 0 and up to r = max_dist
     """
     slices = find_objects(processed_lattice)
+
+    max_dist = int(np.hypot(processed_lattice.shape[0] - 1, processed_lattice.shape[1] - 1))
 
     occ_count = np.zeros(max_dist + 1)
     tot_count = np.zeros(max_dist + 1)
