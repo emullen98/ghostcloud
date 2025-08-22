@@ -8,9 +8,9 @@ from clouds.utils.autocorr_utils import xp
 
 # test_cloud = test_lattice_large.astype(np.uint8)
 
-LATTICE_SIZE = 400
-FILL_PROB = 0.405
-SEED = 1001
+LATTICE_SIZE = 2000
+FILL_PROB = 0.4074
+SEED = 42
 
 raw_lattice = cloud_utils.generate_site_percolation_lattice(LATTICE_SIZE, LATTICE_SIZE, FILL_PROB, seed = SEED)
 # raw_lattice = test_cloud.copy().astype(bool)
@@ -48,6 +48,6 @@ with open('scratch/annulus_'+str(LATTICE_SIZE)+'_seed_'+str(SEED)+'.txt', 'w') a
     for val in C_r:
         f.write(f"{val}\n")
 
-with open('scratch/annulus_'+str(LATTICE_SIZE)+'_seed_'+str(SEED)+'_numden.txt', 'w') as f:
-    for num, denom in zip(total_num, total_denom):
-        f.write(f"{num},{denom}\n")
+# with open('scratch/annulus_'+str(LATTICE_SIZE)+'_seed_'+str(SEED)+'_numden.txt', 'w') as f:
+#     for num, denom in zip(total_num, total_denom):
+#         f.write(f"{num},{denom}\n")

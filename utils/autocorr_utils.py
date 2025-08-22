@@ -269,3 +269,63 @@ def wk_radial_autocorr(single_cloud_binary,
     if return_numpy and asnumpy is not None:
         return asnumpy(num_r), asnumpy(den_r)
     return num_r, den_r
+
+# xp can be numpy or cupy
+def wk_radial_autocorr_matching(
+    f_uint8,                  # 2D uint8 {0,1} cloud (already padded)
+    r_max,                    # max radius to consider (integer)
+    dtype_fft=xp.float64,     # use float64 to validate; you can switch to float32 later
+):
+    """
+    Cloud-centered WK autocorr with analytic ring binning r = ceil(sqrt(dx^2+dy^2)).
+    Denominator matches your annulus version: centers inside cloud, neighbors anywhere in support.
+    Assumes padding >= r_max on all sides of f_uint8 inside the support rectangle.
+    """
+
+    # --- 1) Build support mask m: 1's over the entire padded rectangle
+    H, W = f_uint8.shape
+    m_uint8 = xp.ones((H, W), dtype=xp.uint8)
+
+    # --- 2) Cast once for FFTs
+    f = f_uint8.astype(dtype_fft)
+    m = m_uint8.astype(dtype_fft)
+
+    # --- 3) FFTs
+    F = xp.fft.fft2(f)
+    M = xp.fft.fft2(m)
+
+    # --- 4) Displacement-wise maps (WK)
+    # Numerator: cloud–cloud pairs at each shift Δ
+    N_img = xp.fft.ifft2(F * xp.conj(F)).real
+    # Denominator: cloud-centered (centers in f, neighbor in support m)
+    D_img = xp.fft.ifft2(F * xp.conj(M)).real
+
+    # Numerical cleanup
+    eps = 1e-12 if dtype_fft == xp.float64 else 1e-6
+    N_img = xp.where(N_img > eps, N_img, 0.0)
+    D_img = xp.where(D_img > eps, D_img, 0.0)
+
+    # --- 5) Put zero-lag at center
+    N_img = xp.fft.fftshift(N_img)
+    D_img = xp.fft.fftshift(D_img)
+
+    # --- 6) Analytic ring indices: r = ceil(sqrt(dx^2+dy^2))
+    cy, cx = H // 2, W // 2
+    y = xp.arange(H) - cy
+    x = xp.arange(W) - cx
+    Y, X = xp.meshgrid(y, x, indexing='ij')
+    R_idx = xp.ceil(xp.sqrt(Y*Y + X*X)).astype(xp.int32)
+
+    # Limit to desired radii and where denominator is valid
+    valid = (R_idx <= r_max) & (D_img > 0)
+
+    # --- 7) One-pass radialization via bincount
+    Rv = R_idx[valid].ravel()
+    Nv = N_img[valid].ravel()
+    Dv = D_img[valid].ravel()
+
+    minlength = int(r_max) + 1   # include r = 0
+    N_r = xp.bincount(Rv, weights=Nv, minlength=minlength)
+    D_r = xp.bincount(Rv, weights=Dv, minlength=minlength)
+
+    return N_r, D_r

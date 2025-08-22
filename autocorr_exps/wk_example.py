@@ -8,9 +8,9 @@ from clouds.utils.autocorr_utils import xp
 
 # test_cloud = test_lattice_large.astype(np.uint8)
 
-LATTICE_SIZE = 400
-FILL_PROB = 0.405
-SEED = 1001
+LATTICE_SIZE = 2000
+FILL_PROB = 0.4074
+SEED = 42
 
 raw_lattice = cloud_utils.generate_site_percolation_lattice(LATTICE_SIZE, LATTICE_SIZE, FILL_PROB, seed = SEED)
 # raw_lattice = test_cloud.copy().astype(bool)
@@ -24,9 +24,13 @@ total_denom = xp.zeros(0, dtype=float)
 for cloud in cropped_clouds:
     cloud = xp.asarray(cloud, dtype=xp.uint8)
     h,w = cloud.shape
-    max_radius = int(math.floor(math.sqrt(h**2 + w**2)))
+    square_side = max(h,w)
+    max_radius = int(math.floor(math.sqrt(2*square_side**2)))
 
-    _, num_temp, denom_temp, _ = autocorr_utils.wk_radial_autocorr_numden_fixed(cloud, return_numpy=False, dtype='float64')
+    padded_cloud = autocorr_utils.pad_image(cloud, max_radius)
+
+    # num_temp, denom_temp = autocorr_utils.wk_radial_autocorr(padded_cloud, return_numpy=False, dtype='float64')
+    num_temp, denom_temp = autocorr_utils.wk_radial_autocorr_matching(padded_cloud, max_radius)
 
     num_temp = xp.asarray(num_temp)
     denom_temp = xp.asarray(denom_temp)
@@ -37,10 +41,10 @@ for cloud in cropped_clouds:
 
 C_r = total_num / total_denom
 
-with open('scratch/wk_'+str(LATTICE_SIZE)+'_seed_'+str(SEED)+'.txt', 'w') as f:
+with open('scratch/wk_matching_'+str(LATTICE_SIZE)+'_seed_'+str(SEED)+'.txt', 'w') as f:
     for val in C_r:
         f.write(f"{val}\n")
 
-with open('scratch/wk_'+str(LATTICE_SIZE)+'_seed_'+str(SEED)+'_numden.txt', 'w') as f:
-    for num, denom in zip(total_num, total_denom):
-        f.write(f"{num},{denom}\n")
+# with open('scratch/wk_'+str(LATTICE_SIZE)+'_seed_'+str(SEED)+'_numden.txt', 'w') as f:
+#     for num, denom in zip(total_num, total_denom):
+#         f.write(f"{num},{denom}\n")
