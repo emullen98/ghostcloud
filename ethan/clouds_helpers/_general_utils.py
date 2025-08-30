@@ -1,6 +1,6 @@
 """
 Created May 31 2025
-Updated Aug 19 2025
+Updated Aug 29 2025
 
 (IN CLUSTER)
 General utility functions for clouds project
@@ -58,9 +58,10 @@ def _build_offset_distance(n_rows: int, n_cols: int) -> tuple[np.ndarray, np.nda
 
 
 @njit(parallel=True)
-def _corr_func_core(grid: np.ndarray, offsets: np.ndarray, distances: np.ndarray, unique_r: np.ndarray, frac: float) -> tuple[np.ndarray, np.ndarray]:
+def _corr_func_core_njit(grid: np.ndarray, offsets: np.ndarray, distances: np.ndarray, unique_r: np.ndarray, frac: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    Compute the pair connectivity (correlation) function g(r) for a single cluster
+    Same as _corr_func_core but compiled with Numba for performance.
+    Should only be used for input clusters of large size.
 
     Parameters
     ----------
@@ -109,6 +110,75 @@ def _corr_func_core(grid: np.ndarray, offsets: np.ndarray, distances: np.ndarray
         # For example, say there are 5 occupied sites in the lattice
         # Then for each occupied site, we must check the 8 sites that are a euclidean distance of r = 1 away from this site
         # And repeat the procedure for each euclidean distance r
+        tot_pairs = n_occ * count_offsets
+
+        if tot_pairs == 0:
+            occ_pairs_result[ir] = 0.0
+            tot_pairs_result[ir] = 0.0
+            continue
+
+        occ_pairs = 0
+        for p in rand_idxs:
+            x, y = occ[p]
+            for k in range(offsets.shape[0]):
+                if distances[k] == r:
+                    dx, dy = offsets[k]
+                    tx, ty = int(x + dx), int(y + dy)
+                    if 0 <= tx < grid.shape[0] and 0 <= ty < grid.shape[1]:
+                        occ_pairs += grid[tx, ty]
+        occ_pairs_result[ir] = occ_pairs
+        tot_pairs_result[ir] = tot_pairs
+
+    return occ_pairs_result, tot_pairs_result
+
+
+def _corr_func_core(grid: np.ndarray, offsets: np.ndarray, distances: np.ndarray, unique_r: np.ndarray, frac: float) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute the pair connectivity (correlation) function g(r) for a single cluster.
+
+    Parameters
+    ----------
+    grid : np.ndarray
+        Should contain only one cluster
+    offsets : np.ndarray
+        Nx2 array of (dx, dy) offsets
+    distances : np.ndarray
+        length-N array of rounded Euclidean distances corresponding to each offset
+    unique_r : np.ndarray
+        Sorted 1D array of unique distances to evaluate
+    frac : float
+        Percentage of sites to sample from
+
+    Returns
+    -------
+    occ_pairs_result : np.ndarray
+        Sorted array of # of occupied pairs at each Euclidean distance, starting from trivial case r = 0
+    tot_pairs_result : np.ndarray
+        Sorted array of # of total pairs at each Euclidean distance
+    """
+    n_r = unique_r.shape[0]
+    occ_pairs_result = np.zeros(n_r, dtype=np.float64)
+    tot_pairs_result = np.zeros(n_r, dtype=np.float64)
+
+    occ = []  # Standard Python list
+    for i in range(grid.shape[0]):
+        for j in range(grid.shape[1]):
+            if grid[i, j] == 1:
+                occ.append((i, j))
+    n_occ = len(occ)
+    if n_occ == 0:
+        return occ_pairs_result, tot_pairs_result
+
+    rand_idxs = np.random.choice(a=n_occ, replace=False, size=int(frac * n_occ))
+
+    for ir in range(n_r):  # Use range instead of prange
+        r = unique_r[ir]
+
+        count_offsets = 0
+        for d in distances:
+            if d == r:
+                count_offsets += 1
+
         tot_pairs = n_occ * count_offsets
 
         if tot_pairs == 0:
@@ -291,7 +361,7 @@ def set_thread_count(threads: int) -> None:
     set_num_threads(threads)
 
 
-def get_corr_func(processed_lattice: np.ndarray, num_features: int, frac: float = 1.0) -> np.ndarray:
+def get_corr_func(processed_lattice: np.ndarray, num_features: int, frac: float = 1.0, min_cluster_size: int = 1) -> np.ndarray:
     """
     Wrapper function that takes in a preprocessed lattice and computes its correlation function g(r)
 
@@ -304,6 +374,9 @@ def get_corr_func(processed_lattice: np.ndarray, num_features: int, frac: float 
     frac : float, optional
         Percentage of sites to visit for calculating the correlation function
         Defaults to 1.0
+    min_cluster_size : int, optional
+        Minimum size of clusters to consider for the correlation function
+        Defaults to 1
 
     Returns
     -------
@@ -319,13 +392,17 @@ def get_corr_func(processed_lattice: np.ndarray, num_features: int, frac: float 
     for i in range(num_features):
         cluster = processed_lattice[slices[i]]
         cluster = np.where(cluster == i + 1, 1, 0)
-        if cluster.size == 1:
+        if cluster.size < min_cluster_size:
             continue
 
         offsets, distances = _build_offset_distance(cluster.shape[0], cluster.shape[1])
         unique_r = np.unique(distances)
 
-        occ_count_temp, tot_count_temp = _corr_func_core(cluster, offsets, distances, unique_r, frac)
+        if cluster.size > 10**3:
+            occ_count_temp, tot_count_temp = _corr_func_core_njit(cluster, offsets, distances, unique_r, frac)
+        else:
+            occ_count_temp, tot_count_temp = _corr_func_core(cluster, offsets, distances, unique_r, frac)
+            
         occ_count_temp = np.pad(occ_count_temp, (1, len(occ_count) - (len(occ_count_temp) + 1)), mode='constant', constant_values=(0, 0))
         tot_count_temp = np.pad(tot_count_temp, (1, len(tot_count) - (len(tot_count_temp) + 1)), mode='constant', constant_values=(0, 0))
 
