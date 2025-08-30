@@ -4,14 +4,11 @@ Updated Aug 29 2025
 
 (IN CLUSTER)
 """
-from clouds_helpers import get_corr_func
 import numpy as np
 import sys
-import os
-
-ethan_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(ethan_dir)  # Location of both utils and ethan directories
-sys.path.append(parent_dir)
+sys.path.append('/projects/illinois/eng/physics/dahmen/mullen/ghostcloud/ethan')  # clouds_helpers is in here
+sys.path.append('/projects/illinois/eng/physics/dahmen/mullen/ghostcloud')  # utils is in here
+from clouds_helpers import get_corr_func
 from utils.cloud_utils import generate_site_percolation_lattice, flood_fill_and_label_features
 
 task_id = int(sys.argv[1])
