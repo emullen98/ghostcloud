@@ -6,9 +6,12 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
-#SBATCH --array=0-99
+#SBATCH --array=0-1
 #SBATCH --output=logs/wk_%A_%a.out
 #SBATCH --error=logs/wk_%A_%a.err
+
+# SAMPLE COMMAND:
+# sbatch --export=ALL,LATTICE_SIZE=2000,FILL_PROB=0.4074,SEEDS_FILE=seeds_100.txt,OUTDIR=scratch,PREFIX=wk wk_test_pipeline.sbatch
 
 set -euo pipefail
 

@@ -175,6 +175,91 @@ def extend_and_add(arr_a: xp.ndarray, arr_b: xp.ndarray) -> xp.ndarray:
 
 
 # ================================
+#     Radial Binning Helpers
+# ================================
+
+def rmax_diagonal_batch(h_list, w_list):
+    """
+    Vectorized r_max for many clouds.
+
+    Parameters
+    ----------
+    h_list, w_list : array-like of ints
+        Heights and widths of each tightly-cropped cloud (not the full sky).
+
+    Returns
+    -------
+    r_arr : array of int64, shape (N,)
+        Per-cloud r_max.
+    R_global : int
+        Global maximum r across clouds (0 if no clouds).
+    """
+    import numpy as _np
+    H = _np.asarray(h_list, dtype=_np.int64)
+    W = _np.asarray(w_list, dtype=_np.int64)
+    r_arr = _np.ceil(_np.hypot(H - 1, W - 1)).astype(_np.int64)
+    return r_arr, int(r_arr.max()) if r_arr.size else 0
+
+# module-level state (uses your global `xp`)
+_R   = 0           # largest radius built so far
+_IDX = None        # (2R+1, 2R+1) int32 ring indices (centered)
+_CNT = None        # (R+1,) int64 ring counts
+
+def build_rings_to(R_target: int) -> None:
+    """Build (or grow) the cached ring-index grid up to R_target."""
+    assert R_target >= 0, "R_target must be non-negative"
+    global _R, _IDX, _CNT
+
+    if _IDX is not None and R_target <= _R:
+        return  # already big enough
+
+    R = int(R_target)
+    coords = xp.arange(-R, R + 1, dtype=xp.int32)
+    y2 = coords[:, None].astype(xp.int64) ** 2
+    x2 = coords[None, :].astype(xp.int64) ** 2
+    s = x2 + y2
+    r_idx = xp.ceil(xp.sqrt(s.astype(xp.float64))).astype(xp.int32)
+    xp.clip(r_idx, 0, R, out=r_idx)
+
+    cnt = xp.bincount(r_idx.ravel(), minlength=R + 1).astype(xp.int64)
+
+    _R, _IDX, _CNT = R, r_idx, cnt
+
+def ring_index(r: int):
+    """Centered (2r+1, 2r+1) view of the cached ring indices."""
+    if _IDX is None or r > _R:
+        raise RuntimeError("Cache too small. Call build_rings_to(R_target) first.")
+    if r == _R:
+        return _IDX
+    pad = _R - r
+    return _IDX[pad:-pad, pad:-pad]
+
+def ring_counts(r: int):
+    """Counts per ring 0..r (length r+1)."""
+    if _CNT is None or r > _R:
+        raise RuntimeError("Cache too small. Call build_rings_to(R_target) first.")
+    return _CNT[: r + 1]
+
+def center_crop_to_radius(img, r: int):
+    """Center-crop `img` to (2r+1, 2r+1). Expect zero-lag at center (fftshift first)."""
+    H, W = img.shape
+    cy, cx = H // 2, W // 2
+    return img[cy - r: cy + r + 1, cx - r: cx + r + 1]
+
+def radial_sum(img_cropped, r: int):
+    """Sum values per integer radius 0..r using cached ring indices."""
+    idx = ring_index(r)
+    return xp.bincount(idx.ravel(), weights=img_cropped.ravel(), minlength=r + 1)
+
+def crop_and_bin(img, r: int):
+    """Convenience: crop to r and return (sums, counts) in one call."""
+    c = center_crop_to_radius(img, r)
+    sums = radial_sum(c, r)
+    return sums, ring_counts(r)
+
+
+
+# ================================
 #           WK AUTOCORR
 # ================================
 
@@ -327,5 +412,54 @@ def wk_radial_autocorr_matching(
     minlength = int(r_max) + 1   # include r = 0
     N_r = xp.bincount(Rv, weights=Nv, minlength=minlength)
     D_r = xp.bincount(Rv, weights=Dv, minlength=minlength)
+
+    return N_r, D_r
+
+def wk_radial_autocorr_matching_optimized(
+    f_uint8,                  # 2D uint8 {0,1} cloud (already padded by >= r_max)
+    r_max: int,               # max radius to consider
+    dtype_fft=xp.float32,     # float64 for validation; float32 for speed later
+):
+    """
+    Cloud-centered WK autocorr with analytic ring binning r = ceil(sqrt(dx^2+dy^2)).
+    Optimized:
+      - Real FFTs for numerator
+      - No denominator FFT: D_r = |f| * ring_counts(r)
+      - Cached ring indices/counts; zero per-call meshgrid
+
+    Assumes padding >= r_max on all sides of f_uint8 inside the support rectangle.
+    Returns:
+      N_r, D_r  (both length r_max+1)
+    """
+
+    # --- 0) Make sure our ring cache can serve up to r_max
+    build_rings_to(int(r_max))
+
+    # --- 1) Cast once for FFT
+    # Keep the original uint8 for counting ones exactly and cheaply.
+    H, W = f_uint8.shape
+    f = f_uint8.astype(dtype_fft, copy=False)
+
+    # --- 2) Numerator image via WK using real FFTs
+    # N_img = ifft2(F * conj(F)).real, but use rfft2/irfft2 for memory savings
+    F = xp.fft.rfft2(f)                                       # shape (H, W//2+1)
+    N_img = xp.fft.irfft2(F * xp.conj(F), s=(H, W))           # real autocorr image
+
+    # --- 3) Numerical cleanup (clip tiny negatives to 0 to avoid bincount drift)
+    eps = 1e-12 if dtype_fft == xp.float64 else 1e-6
+    N_img = xp.where(N_img > eps, N_img, 0.0)
+
+    # --- 4) Put zero-lag at center and crop to (2r+1, 2r+1)
+    N_img = xp.fft.fftshift(N_img)
+    N_c = center_crop_to_radius(N_img, int(r_max))
+
+    # --- 5) Radialize numerator (fast bincount using cached indices)
+    N_r = radial_sum(N_c, int(r_max))                         # length r_max+1
+
+    # --- 6) Denominator shortcut: constant plane inside the crop
+    # |f| = number of cloud centers
+    sum_f = f_uint8.sum(dtype=dtype_fft)
+    cnt = ring_counts(int(r_max))                             # int64 counts per ring
+    D_r = sum_f * cnt.astype(dtype_fft, copy=False)
 
     return N_r, D_r
