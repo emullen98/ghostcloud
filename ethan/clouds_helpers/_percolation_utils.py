@@ -1,6 +1,6 @@
 """
 Created May 27 2025
-Updated Jun 08 2025
+Updated Sep 01 2025
 
 Utility functions for working with percolation models in the cluster
 """
@@ -206,7 +206,27 @@ def make_lattice_dp(size: int = 100, p: float = 0.381, end_time: int = 7, fill_h
     return labeled_filled_lattice, filled_lattice, lattice
 
 
-def generate_2d_correlated_field(L, gamma_exp, unit_normalize, seed=None):
+def generate_2d_correlated_field(L: int, gamma_exp: float, unit_normalize: bool, seed: int = None) -> np.ndarray:
+    """
+    Generates a 2D correlated field (correlated percolation lattice) using a Gaussian random field approach.
+
+    Parameters
+    ----------
+    L : int
+        Linear system size.
+    gamma_exp : float
+        Exponent for the correlation function.
+    unit_normalize : bool
+        Whether to normalize the field to the range [0, 1].
+    seed : int, optional
+        Random seed for reproducibility.
+        Defaults to None.
+
+    Returns
+    -------
+    np.ndarray
+        2D correlated field.
+    """
     if seed is not None:
         np.random.seed(seed)
 

@@ -1,6 +1,6 @@
 """
 Created May 31 2025
-Updated Aug 29 2025
+Updated Sep 01 2025
 
 (IN CLUSTER)
 General utility functions for clouds project
@@ -21,7 +21,7 @@ These functions should NOT be called directly
 """
 
 
-def _build_offset_distance(n_rows: int, n_cols: int) -> tuple[np.ndarray, np.ndarray]:
+def _build_offset_distance(max_distance: int) -> tuple[np.ndarray, np.ndarray]:
     """
     Precompute (dx, dy) offsets & their rounded Euclidean distances to be checked from each lattice point
 
@@ -29,8 +29,8 @@ def _build_offset_distance(n_rows: int, n_cols: int) -> tuple[np.ndarray, np.nda
 
     Parameters
     ----------
-    n_rows : int
-    n_cols : int
+    max_distance : int
+        The maximum distance to consider for offsets
 
     Returns
     -------
@@ -39,8 +39,6 @@ def _build_offset_distance(n_rows: int, n_cols: int) -> tuple[np.ndarray, np.nda
     np.ndarray
         Euclidean distances corresponding to offsets
     """
-    max_distance = int(np.ceil(np.hypot(n_rows - 1, n_cols - 1)))
-
     offsets = []
     distances = []
 
@@ -362,49 +360,32 @@ def set_thread_count(threads: int) -> None:
 
 
 def get_corr_func(processed_lattice: np.ndarray, num_features: int, frac: float = 1.0, min_cluster_size: int = 1) -> np.ndarray:
-    """
-    Wrapper function that takes in a preprocessed lattice and computes its correlation function g(r)
-
-    Parameters
-    ----------
-    processed_lattice : np.ndarray
-        Fully processed lattice
-    num_features : int
-        Number of clouds; this should already be known from the preprocessing steps (i.e., the labelling step)
-    frac : float, optional
-        Percentage of sites to visit for calculating the correlation function
-        Defaults to 1.0
-    min_cluster_size : int, optional
-        Minimum size of clusters to consider for the correlation function
-        Defaults to 1
-
-    Returns
-    -------
-    corr_func : np.ndarray
-        Pair-connectivity function g(r) starting from r = 0 and up to r = max_dist
-    """
     slices = find_objects(processed_lattice)
-
     max_dist = int(np.hypot(processed_lattice.shape[0] - 1, processed_lattice.shape[1] - 1))
-
     occ_count = np.zeros(max_dist + 1)
     tot_count = np.zeros(max_dist + 1)
+
+    # Precompute for the whole lattice
+    offsets_full, distances_full = _build_offset_distance(max_dist)
+
     for i in range(num_features):
         cluster = processed_lattice[slices[i]]
         cluster = np.where(cluster == i + 1, 1, 0)
         if cluster.size < min_cluster_size:
             continue
 
-        offsets, distances = _build_offset_distance(cluster.shape[0], cluster.shape[1])
+        cluster_max_dist = int(np.hypot(cluster.shape[0] - 1, cluster.shape[1] - 1))
+        valid_mask = (distances_full <= cluster_max_dist)
+        offsets = offsets_full[valid_mask]
+        distances = distances_full[valid_mask]
         unique_r = np.unique(distances)
 
-        if cluster.size > 10**3:
-            occ_count_temp, tot_count_temp = _corr_func_core_njit(cluster, offsets, distances, unique_r, frac)
-        else:
-            occ_count_temp, tot_count_temp = _corr_func_core(cluster, offsets, distances, unique_r, frac)
-            
-        occ_count_temp = np.pad(occ_count_temp, (1, len(occ_count) - (len(occ_count_temp) + 1)), mode='constant', constant_values=(0, 0))
-        tot_count_temp = np.pad(tot_count_temp, (1, len(tot_count) - (len(tot_count_temp) + 1)), mode='constant', constant_values=(0, 0))
+        occ_count_temp, tot_count_temp = _corr_func_core_njit(cluster, offsets, distances, unique_r, frac)
+
+        pad_left = 1
+        pad_right = len(occ_count) - (len(occ_count_temp) + 1)
+        occ_count_temp = np.pad(occ_count_temp, (pad_left, pad_right), mode='constant', constant_values=(0, 0))
+        tot_count_temp = np.pad(tot_count_temp, (pad_left, pad_right), mode='constant', constant_values=(0, 0))
 
         occ_count += occ_count_temp
         tot_count += tot_count_temp
@@ -562,3 +543,64 @@ def logbinning(unsorted_x: np.ndarray, unsorted_y: np.ndarray, num_bins: int, er
     z = np.sqrt(2) * scipy.stats.norm.ppf((1 + ci) / 2)
 
     return centers, out, errs * z
+
+
+"""
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+These functions are deprecated and should not be used
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+"""
+
+
+def get_corr_func_old(processed_lattice: np.ndarray, num_features: int, frac: float = 1.0, min_cluster_size: int = 1) -> np.ndarray:
+    """
+    Wrapper function that takes in a preprocessed lattice and computes its correlation function g(r)
+
+    Parameters
+    ----------
+    processed_lattice : np.ndarray
+        Fully processed lattice
+    num_features : int
+        Number of clouds; this should already be known from the preprocessing steps (i.e., the labelling step)
+    frac : float, optional
+        Percentage of sites to visit for calculating the correlation function
+        Defaults to 1.0
+    min_cluster_size : int, optional
+        Minimum size of clusters to consider for the correlation function
+        Defaults to 1
+
+    Returns
+    -------
+    corr_func : np.ndarray
+        Pair-connectivity function g(r) starting from r = 0 and up to r = max_dist
+    """
+    slices = find_objects(processed_lattice)
+
+    max_dist = int(np.hypot(processed_lattice.shape[0] - 1, processed_lattice.shape[1] - 1))
+
+    occ_count = np.zeros(max_dist + 1)
+    tot_count = np.zeros(max_dist + 1)
+    for i in range(num_features):
+        cluster = processed_lattice[slices[i]]
+        cluster = np.where(cluster == i + 1, 1, 0)
+        if cluster.size < min_cluster_size:
+            continue
+
+        offsets, distances = _build_offset_distance(cluster.shape[0], cluster.shape[1])
+        unique_r = np.unique(distances)
+
+        if cluster.size > 10**3:
+            occ_count_temp, tot_count_temp = _corr_func_core_njit(cluster, offsets, distances, unique_r, frac)
+        else:
+            occ_count_temp, tot_count_temp = _corr_func_core(cluster, offsets, distances, unique_r, frac)
+            
+        occ_count_temp = np.pad(occ_count_temp, (1, len(occ_count) - (len(occ_count_temp) + 1)), mode='constant', constant_values=(0, 0))
+        tot_count_temp = np.pad(tot_count_temp, (1, len(tot_count) - (len(tot_count_temp) + 1)), mode='constant', constant_values=(0, 0))
+
+        occ_count += occ_count_temp
+        tot_count += tot_count_temp
+
+    corr_func = np.divide(occ_count, tot_count, out=np.zeros_like(occ_count, dtype=float), where=tot_count != 0)
+    corr_func[0] = 1
+
+    return corr_func
