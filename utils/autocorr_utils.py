@@ -206,39 +206,59 @@ _IDX = None        # (2R+1, 2R+1) int32 ring indices (centered)
 _CNT = None        # (R+1,) int64 ring counts
 
 def build_rings_to(R_target: int) -> None:
-    """Build (or grow) the cached ring-index grid up to R_target."""
-    assert R_target >= 0, "R_target must be non-negative"
+    assert R_target >= 0
     global _R, _IDX, _CNT
-
     if _IDX is not None and R_target <= _R:
-        return  # already big enough
+        return
 
     R = int(R_target)
-    coords = xp.arange(-R, R + 1, dtype=xp.int32)
-    y2 = coords[:, None].astype(xp.int64) ** 2
-    x2 = coords[None, :].astype(xp.int64) ** 2
-    s = x2 + y2
-    r_idx = xp.ceil(xp.sqrt(s.astype(xp.float64))).astype(xp.int32)
+    coords = xp.arange(-R, R + 1, dtype=xp.int64)
+    y = coords[:, None]
+    x = coords[None, :]
+    s = x * x + y * y                      # exact in int64
+
+    # floor sqrt in float, then correct exactly at squares to emulate ceil()
+    r_floor = xp.floor(xp.sqrt(s.astype(xp.float64))).astype(xp.int64)
+    is_square = (r_floor * r_floor == s)   # exact integer check
+    r_idx = r_floor + (~is_square)         # ceil: add 1 if not a square
+    r_idx = r_idx.astype(xp.int32)
     xp.clip(r_idx, 0, R, out=r_idx)
 
-    cnt = xp.bincount(r_idx.ravel(), minlength=R + 1).astype(xp.int64)
+    _R   = R
+    _IDX = r_idx
+    _CNT = xp.bincount(r_idx.ravel(), minlength=R + 1).astype(xp.int64)
 
-    _R, _IDX, _CNT = R, r_idx, cnt
 
 def ring_index(r: int):
-    """Centered (2r+1, 2r+1) view of the cached ring indices."""
     if _IDX is None or r > _R:
         raise RuntimeError("Cache too small. Call build_rings_to(R_target) first.")
     if r == _R:
         return _IDX
     pad = _R - r
+    if r == 0:
+        return _IDX[pad:pad+1, pad:pad+1]  # 1×1 center
     return _IDX[pad:-pad, pad:-pad]
 
+
 def ring_counts(r: int):
-    """Counts per ring 0..r (length r+1)."""
-    if _CNT is None or r > _R:
-        raise RuntimeError("Cache too small. Call build_rings_to(R_target) first.")
-    return _CNT[: r + 1]
+    idx = ring_index(r)                         # (2r+1, 2r+1) centered
+    flat = idx.ravel()
+    m = flat <= r                               # keep only shells 0..r
+    return xp.bincount(flat[m], minlength=r+1).astype(xp.int64)
+
+def radial_sum(img_cropped, r: int):
+    idx = ring_index(r)
+    flat_i = idx.ravel()
+    flat_w = img_cropped.ravel()
+    m = flat_i <= r
+    return xp.bincount(flat_i[m], weights=flat_w[m], minlength=r+1)
+
+
+
+# def ring_counts(r: int):
+#     idx = ring_index(r)  # local (2r+1, 2r+1) view
+#     return xp.bincount(idx.ravel(), minlength=r + 1).astype(xp.int64)
+
 
 def center_crop_to_radius(img, r: int):
     """Center-crop `img` to (2r+1, 2r+1). Expect zero-lag at center (fftshift first)."""
@@ -246,16 +266,47 @@ def center_crop_to_radius(img, r: int):
     cy, cx = H // 2, W // 2
     return img[cy - r: cy + r + 1, cx - r: cx + r + 1]
 
-def radial_sum(img_cropped, r: int):
-    """Sum values per integer radius 0..r using cached ring indices."""
-    idx = ring_index(r)
-    return xp.bincount(idx.ravel(), weights=img_cropped.ravel(), minlength=r + 1)
+# def radial_sum(img_cropped, r: int):
+#     """Sum values per integer radius 0..r using cached ring indices."""
+#     idx = ring_index(r)
+#     return xp.bincount(idx.ravel(), weights=img_cropped.ravel(), minlength=r + 1)
 
 def crop_and_bin(img, r: int):
     """Convenience: crop to r and return (sums, counts) in one call."""
     c = center_crop_to_radius(img, r)
     sums = radial_sum(c, r)
     return sums, ring_counts(r)
+
+# ================================
+#    WK padding bug fix helpers
+# ================================
+
+def _calc_padding_per_side(H: int, W: int, R: int, guard: int = 0):
+    """
+    Minimal linear-safe halo for lags |dx|,|dy|<=R: at least R per side,
+    and force odd×odd padded size. `guard` (0/1) gives a 1px cushion if desired.
+    Returns (Py, Px) to add on EACH side.
+    """
+    Py = R + guard
+    Px = R + guard
+
+    # Make padded size odd in each dimension
+    if (H + 2*Py) % 2 == 0:
+        Py += 1
+    if (W + 2*Px) % 2 == 0:
+        Px += 1
+    return Py, Px
+
+def pad_for_wk(image: xp.ndarray, R: int, guard: int = 0):
+    """
+    Pad with the minimal linear-safe halo (per-side) and ensure odd×odd canvas.
+    Returns (padded_uint8, (Py, Px)).
+    """
+    H, W = image.shape
+    Py, Px = _calc_padding_per_side(H, W, R, guard=guard)
+    padded = xp.pad(image, ((Py, Py), (Px, Px)), mode="constant")
+    return padded.astype(xp.uint8), (Py, Px)
+
 
 
 
@@ -418,7 +469,7 @@ def wk_radial_autocorr_matching(
 def wk_radial_autocorr_matching_optimized(
     f_uint8,                  # 2D uint8 {0,1} cloud (already padded by >= r_max)
     r_max: int,               # max radius to consider
-    dtype_fft=xp.float32,     # float64 for validation; float32 for speed later
+    dtype_fft=xp.float64,     # float64 for validation; float32 for speed later
 ):
     """
     Cloud-centered WK autocorr with analytic ring binning r = ceil(sqrt(dx^2+dy^2)).

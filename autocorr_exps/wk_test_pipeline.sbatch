@@ -11,7 +11,7 @@
 #SBATCH --error=logs/wk_%A_%a.err
 
 # SAMPLE COMMAND:
-# sbatch --export=ALL,LATTICE_SIZE=2000,FILL_PROB=0.4074,SEEDS_FILE=seeds_100.txt,OUTDIR=scratch,PREFIX=wk wk_test_pipeline.sbatch
+# sbatch --export=ALL,LATTICE_SIZE=2000,FILL_PROB=0.4074,SEEDS_FILE=clouds/autocorr_exps/seeds_100.txt,OUTDIR=scratch/debug/,PREFIX=new_max_r clouds/autocorr_exps/wk_test_pipeline.sbatch
 
 set -euo pipefail
 
@@ -46,9 +46,11 @@ fi
 echo "[INFO] LATTICE_SIZE=${LATTICE_SIZE} FILL_PROB=${FILL_PROB} SEED=${SEED}"
 
 # --- Run module (unbuffered stdout)
-srun -u python -u -m clouds.autocorr_exps.wk_test_pipeline \
-  --lattice-size "${LATTICE_SIZE}" \
-  --fill-prob "${FILL_PROB}" \
-  --seed "${SEED}" \
-  --outdir "${OUTDIR}" \
-  --prefix "${PREFIX}"
+#srun -u python -u -m clouds.autocorr_exps.wk_optimal \
+#  --lattice-size "${LATTICE_SIZE}" \
+#  --fill-prob "${FILL_PROB}" \
+#  --seed "${SEED}" \
+#  --outdir "${OUTDIR}" \
+#  --prefix "${PREFIX}"
+
+srun -u python -u -m clouds.autocorr_exps.annulus_example \

@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--lattice-size", type=int, required=True)
     parser.add_argument("--fill-prob", type=float, required=True)
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--min-area", type=int, default=0)
+    parser.add_argument("--min-area", type=int, default=300)
     parser.add_argument("--outdir", type=str, default="scratch")
     parser.add_argument("--prefix", type=str, default="wk_matching")
     args = parser.parse_args()

@@ -67,12 +67,14 @@ def main():
         r_max = int(_to_numpy(r_max))
         cloud = xp.asarray(cloud, dtype=xp.uint8)
 
+        # r_max = floor(sqrt(2 * side^2)) — matches your earlier scheme
+
         # Pad by exactly r_max (guarantees denominator shortcut is valid)
-        padded_cloud = autocorr_utils.pad_image(cloud, r_max)
+        padded_cloud, _ = autocorr_utils.pad_for_wk(cloud, 2*r_max, guard=0)
 
         # Optimized WK: rFFT for numerator; denominator = |f| * ring_counts(r)
         num_temp, denom_temp = autocorr_utils.wk_radial_autocorr_matching_optimized(
-            padded_cloud, r_max, dtype_fft=xp.float32
+            padded_cloud, r_max, dtype_fft=xp.float64
         )
 
         # Ensure xp arrays (extend_and_add expects xp arrays)
