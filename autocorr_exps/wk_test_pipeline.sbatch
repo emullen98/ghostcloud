@@ -46,7 +46,7 @@ fi
 echo "[INFO] LATTICE_SIZE=${LATTICE_SIZE} FILL_PROB=${FILL_PROB} SEED=${SEED}"
 
 # --- Run module (unbuffered stdout)
-srun -u python -u -m clouds.autocorr_exps.wk_test_pipeline \
+srun -u python -u -m clouds.autocorr_exps.wk_per_lattice \
   --lattice-size "${LATTICE_SIZE}" \
   --fill-prob "${FILL_PROB}" \
   --seed "${SEED}" \
