@@ -34,6 +34,11 @@ flattened_data = flatten_cloud_metadata_for_csv(cloud_data)
 
 filename = Path(OUT_DIR_PATH) / "slice_data.csv.gz"
 with gzip.open(filename, "wt", encoding="utf-8") as f:
-    writer = csv.DictWriter(f, fieldnames=flattened_data[0].keys())
-    writer.writeheader()
-    writer.writerows(flattened_data)
+    if not flattened_data:
+        fieldnames = ["slice_id","mirrored_area","mirrored_perimeter"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+    else:
+        writer = csv.DictWriter(f, fieldnames=list(flattened_data[0].keys()))
+        writer.writeheader()
+        writer.writerows(flattened_data)

@@ -16,10 +16,10 @@ def load_summary(path):
     return df_slices, d_full
 
 # === CONFIG ===
-gammas = ["g_0p1975", "g_0p200", "g_0p2025", "g_0p205"]
-ps = ["p_0p460", "p_0p465", "p_0p470", "p_0p475", "p_0p480", "p_0p485", "p_0p490", "p_0p495"]
+gammas = ["g_0p15", "g_0p2", "g_0p25", "g_0p3", "g_0p35", "g_0p4", "g_0p45"]
+ps = ["p_0p375", "p_0p4", "p_0p425", "p_0p45", "p_0p475", "p_0p5", "p_0p525"]
 
-base_path = Path("/scratch/mbiju2/storm/cp_crit_exp_aggregated_20250711/analysis")
+base_path = Path("/scratch/mbiju2/storm/cp_crit_exp_20250913_144149/analysis")
 
 plt.figure(figsize=(14, 10))
 
@@ -48,5 +48,5 @@ plt.ylabel("ΔD (D_slice - D_full)")
 plt.title("Delta D vs Slice Ratio (All gamma–p pairs)")
 plt.legend(fontsize=7, ncol=3)
 plt.tight_layout()
-plt.savefig("delta_D_all_gamma_p.png")
+plt.savefig("cp_crit_exp_20250913_144149_delta_D_all_gamma_p.png")
 print("[INFO] Plot saved to delta_D_all_gamma_p.png")
