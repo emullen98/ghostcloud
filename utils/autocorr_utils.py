@@ -10,9 +10,12 @@ Philosophy:
 - Ring counts are computed *locally* inside the (2r+1)^2 crop and exclude indices > r.
 """
 
+from scipy.optimize import curve_fit
+from dataclasses import dataclass
 from . import config
-from typing import Tuple, List, Literal
+from typing import Tuple, List, Literal, Optional
 import math
+import json
 
 # ---------------------------
 # Backend selection (NumPy/CuPy)
@@ -294,3 +297,97 @@ def compute_radial_autocorr(image, mask_stack):
     area = mask_stack.sum(axis=(1, 2), dtype=xp.int64)
     denominator = area * n_centers                  # D[r]
     return numerator, denominator
+
+
+# ...existing code...
+
+@dataclass
+class ExponentialFit:
+    """Results from fitting C(r) to exponential decay."""
+    correlation_length: float
+    success: bool
+    r_eff: float  # effective range where C(r) drops below threshold
+    r_half: float  # r where C(r) = 0.5
+    error: Optional[str] = None
+
+def find_characteristic_lengths(r: np.ndarray, cr: np.ndarray, 
+                             threshold: float = 0.01) -> Tuple[float, float]:
+    """Find characteristic lengths from correlation data."""
+    # Find r_eff where C(r) first drops below threshold
+    below_thresh = np.where(cr < threshold)[0]
+    r_eff = r[below_thresh[0]] if len(below_thresh) > 0 else r[-1]
+    
+    # Find r_half where C(r) crosses 0.5
+    half_crosses = np.where(np.diff(np.signbit(cr - 0.5)))[0]
+    r_half = r[half_crosses[0]] if len(half_crosses) > 0 else r_eff/2
+    
+    return r_eff, r_half
+
+def fit_exponential_decay(r: np.ndarray, cr: np.ndarray, 
+                         threshold: float = 0.01) -> ExponentialFit:
+    """
+    Fit correlation function to exponential decay after normalizing by r_eff.
+    
+    Args:
+        r: Array of r values
+        cr: Array of C(r) values
+        threshold: Value defining effective zero
+    """
+    try:
+        # Find characteristic lengths
+        r_eff, r_half = find_characteristic_lengths(r, cr, threshold)
+        
+        # Normalize r by r_eff
+        r_norm = r / r_eff
+        
+        # Fit only up to where C(r) > threshold
+        mask = cr >= threshold
+        r_fit = r_norm[mask]
+        cr_fit = cr[mask]
+        
+        def exp_model(r, xi):
+            return np.exp(-r/xi)
+        
+        # Fit normalized exponential
+        popt, _ = curve_fit(exp_model, r_fit, cr_fit, p0=[0.5])
+        
+        return ExponentialFit(
+            correlation_length=float(popt[0]),
+            success=True,
+            r_eff=float(r_eff),
+            r_half=float(r_half)
+        )
+        
+    except Exception as e:
+        return ExponentialFit(
+            correlation_length=float('nan'),
+            success=False,
+            r_eff=float('nan'),
+            r_half=float('nan'),
+            error=str(e)
+        )
+
+def save_fit_results(fits: List[ExponentialFit], output_path: str) -> None:
+    """Save fitting results to JSON file."""
+    results = {
+        "fits": [
+            {
+                "correlation_length": fit.correlation_length,
+                "r_eff": fit.r_eff,
+                "r_half": fit.r_half,
+                "success": fit.success,
+                "error": fit.error
+            }
+            for fit in fits
+        ],
+        "summary": {
+            "n_success": sum(1 for f in fits if f.success),
+            "mean_correlation_length": float(np.mean([f.correlation_length 
+                                                    for f in fits if f.success])),
+            "std_correlation_length": float(np.std([f.correlation_length 
+                                                  for f in fits if f.success]))
+        }
+    }
+    
+    with open(output_path, 'w') as f:
+        json.dump(results, f, indent=2)

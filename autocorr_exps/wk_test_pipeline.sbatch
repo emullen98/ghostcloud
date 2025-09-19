@@ -20,11 +20,12 @@ PROJECT_ROOT="${PROJECT_ROOT:-/u/mbiju2}"   # <-- EDIT THIS
 cd "$PROJECT_ROOT"
 
 # --- Config (override with: sbatch --export=ALL,VAR=... ...)
-LATTICE_SIZE="${LATTICE_SIZE:-2000}"
+LATTICE_SIZE="${LATTICE_SIZE:-10000}"
 FILL_PROB="${FILL_PROB:-0.4074}"
 SEEDS_FILE="${SEEDS_FILE:-seeds_100.txt}"   # one seed per line
 OUTDIR="${OUTDIR:-scratch}"
 PREFIX="${PREFIX:-wk}"
+MIN_AREA="${MIN_AREA:-1000}"  # Add minimum area parameter
 
 # --- Environment
 module load cuda/12.8
@@ -51,4 +52,5 @@ srun -u python -u -m clouds.autocorr_exps.wk_per_lattice \
   --fill-prob "${FILL_PROB}" \
   --seed "${SEED}" \
   --outdir "${OUTDIR}" \
-  --prefix "${PREFIX}"
+  --prefix "${PREFIX}" \
+  --min-area "${MIN_AREA}"  # Add min-area parameter
