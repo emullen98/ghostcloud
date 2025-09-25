@@ -10,12 +10,13 @@ Philosophy:
 - Ring counts are computed *locally* inside the (2r+1)^2 crop and exclude indices > r.
 """
 
-from scipy.optimize import curve_fit
 from dataclasses import dataclass
 from . import config
 from typing import Tuple, List, Literal, Optional
-import math
-import json
+import numpy as np
+import os
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 # ---------------------------
 # Backend selection (NumPy/CuPy)
@@ -30,7 +31,6 @@ if config.USE_GPU:
     except ImportError as e:
         raise ImportError("CuPy is required for GPU support but is not installed.") from e
 else:
-    import numpy as np
     xp = np
     xp_backend = "numpy"
     print("Using NumPy for CPU operations.")
@@ -64,6 +64,62 @@ def extend_and_add(a, b):
         out[:lb] = b
         return a + out
 
+# ---- Boundary mask via 4-connected neighbor counts (perimeter-style) ----
+# Uses ndimage.convolve with the 4-neighbor cross kernel.
+# GPU-friendly: will use cupyx.scipy.ndimage if xp is CuPy.
+def make_boundary_mask4(cloud_uint8):
+    """
+    4-connected boundary mask: select cloud pixels that have <4 filled
+    N/S/E/W neighbors (zeros outside count as background).
+
+    Parameters
+    ----------
+    cloud_uint8 : (H,W) uint8 in {0,1}
+
+    Returns
+    -------
+    boundary_uint8 : (H,W) uint8 in {0,1}
+    """
+    m = (cloud_uint8 != 0).astype(xp.uint8, copy=False)
+
+    # Try ndimage first (fast & concise on both CPU/GPU)
+    ndimage = None
+    try:
+        if xp.__name__ == "cupy":
+            import cupyx.scipy.ndimage as ndimage  # GPU path
+        else:
+            import scipy.ndimage as ndimage        # CPU path
+    except Exception:
+        ndimage = None
+
+    if ndimage is not None:
+        k4 = xp.array([[0, 1, 0],
+                       [1, 0, 1],
+                       [0, 1, 0]], dtype=xp.uint8)
+        neigh = ndimage.convolve(m, k4, mode="constant", cval=0)
+        boundary = (m & (neigh < 4)).astype(xp.uint8, copy=False)
+        return boundary
+
+    # Fallback (no ndimage): zero-padded shifts
+    def _shift_zeros(a, dy, dx):
+        H, W = a.shape
+        out = xp.zeros_like(a)
+        y0s = max(0, -dy); y1s = min(H, H - dy)
+        x0s = max(0, -dx); x1s = min(W, W - dx)
+        y0d = max(0,  dy); y1d = min(H, H + dy)
+        x0d = max(0,  dx); x1d = min(W, W + dx)
+        if y0s < y1s and x0s < x1s:
+            out[y0d:y1d, x0d:x1d] = a[y0s:y1s, x0s:x1s]
+        return out
+
+    up    = _shift_zeros(m, -1,  0)
+    down  = _shift_zeros(m,  1,  0)
+    left  = _shift_zeros(m,  0, -1)
+    right = _shift_zeros(m,  0,  1)
+    neigh = (up + down + left + right)
+    boundary = (m & (neigh < 4)).astype(xp.uint8, copy=False)
+    return boundary
+
 # -----------------------------------
 # r_max (binning) for cropped clouds
 # -----------------------------------
@@ -79,10 +135,10 @@ def rmax_diagonal_batch(h_list, w_list):
     R_global : int
         max(r_arr) or 0 if no clouds.
     """
-    import numpy as _np
-    H = _np.asarray(h_list, dtype=_np.int64)
-    W = _np.asarray(w_list, dtype=_np.int64)
-    r_arr = _np.ceil(_np.hypot(H - 1, W - 1)).astype(_np.int64)
+    import numpy as np
+    H = np.asarray(h_list, dtype=np.int64)
+    W = np.asarray(w_list, dtype=np.int64)
+    r_arr = np.ceil(np.hypot(H - 1, W - 1)).astype(np.int64)
     return r_arr, int(r_arr.max()) if r_arr.size else 0
 
 # -----------------------------------
@@ -256,6 +312,114 @@ def wk_radial_autocorr(
 
     return N_r, D_r
 
+def wk_radial_autocorr_dual(
+    cloud_uint8,               # 2D uint8 array {0,1}, already padded by >= r_max
+    r_max: int,                # maximum radial bin (shells up to this radius)
+    dtype_fft=None,            # None -> float64 (for accuracy); use float32 for speed
+):
+    """
+    Wiener–Khinchin radial autocorrelation with dual center sets:
+      (A) centers = all cloud pixels
+      (B) centers = boundary cloud pixels (4-connected)
+
+    The numerator is obtained from the FFT-based autocorrelation:
+        N_img = ifft2( F(f) * conj(F(mask)) )
+    where f is the full cloud, and mask is the set of valid centers.
+
+    The denominator is purely analytic:
+        D_r = (# centers) * ring_counts(r)
+
+    Assumptions
+    -----------
+    - cloud_uint8 is binary {0,1} and padded with >= r_max halo so that
+      every cloud pixel (or boundary pixel) can act as a valid center.
+    - The ring cache has been prebuilt via build_rings_to(r_max).
+
+    Parameters
+    ----------
+    cloud_uint8 : ndarray (H, W), dtype=uint8
+        Binary padded cloud image.
+    r_max : int
+        Maximum radius to bin into shells.
+    dtype_fft : dtype or None
+        Floating-point precision for FFTs. None -> float64 (safer).
+        Use float32 for large production runs if memory bound.
+
+    Returns
+    -------
+    results : dict
+        {
+          "all":      (N_r_all, D_r_all),       # centers = all cloud pixels
+          "boundary": (N_r_bnd, D_r_bnd)        # centers = 4-connected boundary
+        }
+        Each N_r, D_r is a 1D array of length (r_max+1), dtype=dtype_fft.
+    """
+    # ------------------------------
+    # 0) Types & tolerances
+    # ------------------------------
+    if dtype_fft is None:
+        dtype_fft = xp.float64
+    eps = 1e-12 if dtype_fft == xp.float64 else 1e-6
+
+    r_max = int(r_max)
+    build_rings_to(r_max)  # ensure ring cache covers up to r_max
+
+    H, W = cloud_uint8.shape
+    f = cloud_uint8.astype(dtype_fft, copy=False)
+
+    # ------------------------------
+    # 1) FFT of full cloud (expensive, do once)
+    # ------------------------------
+    F_f = xp.fft.rfft2(f, s=(H, W))
+
+    # ------------------------------
+    # 2) Define center masks
+    # ------------------------------
+    mask_all = cloud_uint8                        # all cloud pixels as centers
+    mask_bnd = make_boundary_mask4(cloud_uint8)   # boundary-only centers (4-conn)
+
+    # ------------------------------
+    # 3) FFTs of masks (cheap compared to #1)
+    # ------------------------------
+    F_mask_all = xp.fft.rfft2(mask_all.astype(dtype_fft, copy=False), s=(H, W))
+    F_mask_bnd = xp.fft.rfft2(mask_bnd.astype(dtype_fft, copy=False), s=(H, W))
+
+    # ------------------------------
+    # 4) Helper: cross-correlation with given mask
+    # ------------------------------
+    def _corr_with_mask(F_mask, mask_uint8):
+        # WK numerator: cross-correlation f ⊗ mask
+        N_img = xp.fft.irfft2(F_f * xp.conj(F_mask), s=(H, W))
+
+        # Numerical cleanup: eliminate tiny negatives from roundoff
+        if eps > 0:
+            nz = N_img <= eps
+            if nz.any():
+                N_img[nz] = 0.0
+
+        # Center zero-lag, crop to (2r+1)^2, then radialize
+        N_img = xp.fft.fftshift(N_img)
+        N_c = center_crop_to_radius(N_img, r_max)
+        N_r = radial_sum(N_c, r_max).astype(dtype_fft, copy=False)
+
+        # Denominator: (# of centers) * ring_counts
+        num_centers = mask_uint8.sum(dtype=xp.int64)
+        cnt = ring_counts(r_max)
+        D_r = (num_centers * cnt).astype(dtype_fft, copy=False)
+
+        return N_r, D_r
+
+    # ------------------------------
+    # 5) Compute both outputs
+    # ------------------------------
+    N_all, D_all = _corr_with_mask(F_mask_all, mask_all)
+    N_bnd, D_bnd = _corr_with_mask(F_mask_bnd, mask_bnd)
+
+    return {
+        "all":      (N_all, D_all),
+        "boundary": (N_bnd, D_bnd),
+    }
+
 # -----------------------------------
 # Annulus method (validation/legacy)
 # -----------------------------------
@@ -298,96 +462,100 @@ def compute_radial_autocorr(image, mask_stack):
     denominator = area * n_centers                  # D[r]
     return numerator, denominator
 
-
-# ...existing code...
+# -----------------------------------
+# Per-cloud C(r) Parquet writer
+# -----------------------------------
 
 @dataclass
-class ExponentialFit:
-    """Results from fitting C(r) to exponential decay."""
-    correlation_length: float
-    success: bool
-    r_eff: float  # effective range where C(r) drops below threshold
-    r_half: float  # r where C(r) = 0.5
-    error: Optional[str] = None
-
-def find_characteristic_lengths(r: np.ndarray, cr: np.ndarray, 
-                             threshold: float = 0.01) -> Tuple[float, float]:
-    """Find characteristic lengths from correlation data."""
-    # Find r_eff where C(r) first drops below threshold
-    below_thresh = np.where(cr < threshold)[0]
-    r_eff = r[below_thresh[0]] if len(below_thresh) > 0 else r[-1]
-    
-    # Find r_half where C(r) crosses 0.5
-    half_crosses = np.where(np.diff(np.signbit(cr - 0.5)))[0]
-    r_half = r[half_crosses[0]] if len(half_crosses) > 0 else r_eff/2
-    
-    return r_eff, r_half
-
-def fit_exponential_decay(r: np.ndarray, cr: np.ndarray, 
-                         threshold: float = 0.01) -> ExponentialFit:
+class CloudRow:
     """
-    Fit correlation function to exponential decay after normalizing by r_eff.
-    
-    Args:
-        r: Array of r values
-        cr: Array of C(r) values
-        threshold: Value defining effective zero
+    Per-cloud row with C(r) and optional boundary C(r).
+    - `cr`     : C(r) for centers = all cloud pixels
+    - `cr_bnd` : C(r) for centers = boundary pixels (4-connected); optional
     """
-    try:
-        # Find characteristic lengths
-        r_eff, r_half = find_characteristic_lengths(r, cr, threshold)
-        
-        # Normalize r by r_eff
-        r_norm = r / r_eff
-        
-        # Fit only up to where C(r) > threshold
-        mask = cr >= threshold
-        r_fit = r_norm[mask]
-        cr_fit = cr[mask]
-        
-        def exp_model(r, xi):
-            return np.exp(-r/xi)
-        
-        # Fit normalized exponential
-        popt, _ = curve_fit(exp_model, r_fit, cr_fit, p0=[0.5])
-        
-        return ExponentialFit(
-            correlation_length=float(popt[0]),
-            success=True,
-            r_eff=float(r_eff),
-            r_half=float(r_half)
-        )
-        
-    except Exception as e:
-        return ExponentialFit(
-            correlation_length=float('nan'),
-            success=False,
-            r_eff=float('nan'),
-            r_half=float('nan'),
-            error=str(e)
-        )
+    cloud_idx: int
+    perim: int
+    area: int
+    cr: np.ndarray                    # 1D float64 (length r_max+1)
+    cr_bnd: Optional[np.ndarray] = None  # 1D float64 or None
 
-def save_fit_results(fits: List[ExponentialFit], output_path: str) -> None:
-    """Save fitting results to JSON file."""
-    results = {
-        "fits": [
-            {
-                "correlation_length": fit.correlation_length,
-                "r_eff": fit.r_eff,
-                "r_half": fit.r_half,
-                "success": fit.success,
-                "error": fit.error
-            }
-            for fit in fits
-        ],
-        "summary": {
-            "n_success": sum(1 for f in fits if f.success),
-            "mean_correlation_length": float(np.mean([f.correlation_length 
-                                                    for f in fits if f.success])),
-            "std_correlation_length": float(np.std([f.correlation_length 
-                                                  for f in fits if f.success]))
-        }
-    }
-    
-    with open(output_path, 'w') as f:
-        json.dump(results, f, indent=2)
+class ParquetWriter:
+    """
+    Append-style writer for per-cloud C(r).
+
+    Columns:
+      - cloud_idx (int64)
+      - perim     (int64)
+      - area      (int64)
+      - cr        (List<float64>)                 # required
+      - cr_bnd    (List<float64>, nullable)       # optional per row
+
+    Writes to sharded part files for safe incremental appends.
+    """
+    def __init__(self, outdir: str, basename: str,
+                 rows_per_flush: int | None = None,
+                 max_bytes_per_flush: int = 128 * 1024 * 1024):
+        os.makedirs(outdir, exist_ok=True)
+        self.base = os.path.join(outdir, basename)
+        self.rows_per_flush = rows_per_flush
+        self.max_bytes_per_flush = max_bytes_per_flush
+        self._rows: List[CloudRow] = []
+        self._approx_bytes = 0
+        self._part_idx = 0
+
+    def add(self, row: CloudRow):
+        # normalize dtypes
+        row.cr = np.asarray(row.cr, dtype=np.float64)
+        if row.cr_bnd is not None:
+            row.cr_bnd = np.asarray(row.cr_bnd, dtype=np.float64)
+
+        # queue & update size estimate (include both lists if present)
+        self._rows.append(row)
+        size = row.cr.nbytes + 32
+        if row.cr_bnd is not None:
+            size += row.cr_bnd.nbytes + 16
+        self._approx_bytes += size
+
+        need_row_flush = (self.rows_per_flush is not None) and (len(self._rows) >= self.rows_per_flush)
+        need_byte_flush = (self._approx_bytes >= self.max_bytes_per_flush)
+        if need_row_flush or need_byte_flush:
+            self.flush()
+
+    def flush(self):
+        if not self._rows:
+            return
+        part_path = f"{self.base}.part{self._part_idx:05d}.parquet"
+        table = self._rows_to_table(self._rows)
+        pq.write_table(table, part_path, compression="zstd", use_dictionary=False)
+        self._rows.clear()
+        self._approx_bytes = 0
+        self._part_idx += 1
+
+    def close(self):
+        self.flush()
+
+    @staticmethod
+    def _rows_to_table(rows: List['CloudRow']) -> pa.Table:
+        """
+        Build a PyArrow table with ragged list columns and nullable cr_bnd.
+        We intentionally use pa.array([...], type=pa.list_(pa.float64()))
+        because it handles raggedness and None entries robustly.
+        """
+        cloud_idx = pa.array([r.cloud_idx for r in rows], type=pa.int64())
+        perim     = pa.array([r.perim     for r in rows], type=pa.int64())
+        area      = pa.array([r.area      for r in rows], type=pa.int64())
+
+        # Python lists of lists (or None) => robust ragged/nullable conversion
+        cr_py      = [r.cr.tolist() for r in rows]
+        cr_bnd_py  = [None if (r.cr_bnd is None) else r.cr_bnd.tolist() for r in rows]
+
+        cr      = pa.array(cr_py,     type=pa.list_(pa.float64()))
+        cr_bnd  = pa.array(cr_bnd_py, type=pa.list_(pa.float64()))  # nullable rows become nulls
+
+        return pa.table({
+            "cloud_idx": cloud_idx,
+            "perim":     perim,
+            "area":      area,
+            "cr":        cr,
+            "cr_bnd":    cr_bnd,   # always present in schema; null where absent
+        })

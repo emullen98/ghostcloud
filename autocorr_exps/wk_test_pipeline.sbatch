@@ -6,12 +6,12 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
-#SBATCH --array=0-1
+#SBATCH --array=0-99
 #SBATCH --output=logs/wk_%A_%a.out
 #SBATCH --error=logs/wk_%A_%a.err
 
 # SAMPLE COMMAND:
-# sbatch --export=ALL,LATTICE_SIZE=2000,FILL_PROB=0.4074,SEEDS_FILE=clouds/autocorr_exps/seeds_100.txt,OUTDIR=scratch/debug/,PREFIX=new_max_r clouds/autocorr_exps/wk_test_pipeline.sbatch
+# sbatch --export=ALL,LATTICE_SIZE=10000,FILL_PROB=0.4074,SEEDS_FILE=clouds/autocorr_exps/seeds_100.txt,OUTDIR=scratch/autocorr_norm/,PREFIX=aggregation_trial_01,MIN_AREA=1000 clouds/autocorr_exps/wk_test_pipeline.sbatch
 
 set -euo pipefail
 

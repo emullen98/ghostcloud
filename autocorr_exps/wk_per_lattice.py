@@ -12,27 +12,6 @@ from clouds.utils.autocorr_utils import xp  # xp = numpy or cupy per your utils
 def _to_numpy(arr):
     return xp.asnumpy(arr) if hasattr(xp, "asnumpy") else np.asarray(arr)
 
-def save_all_correlation_data(cloud_data: list, output_path: str) -> None:
-    """
-    Save correlation data for all clouds.
-    
-    Args:
-        cloud_data: List of dictionaries containing N_r and D_r for each cloud
-        output_path: Path to save JSON file
-    """
-    data = {
-        "n_clouds": len(cloud_data),
-        "clouds": [
-            {
-                "N_r": _to_numpy(cloud["N_r"]).tolist(),
-                "D_r": _to_numpy(cloud["D_r"]).tolist()
-            }
-            for cloud in cloud_data
-        ]
-    }
-    with open(output_path, 'w') as f:
-        json.dump(data, f)
-
 def main():
     parser = argparse.ArgumentParser(
         description="Compute C(r) via WK (analytic binning) for a single lattice/seed."
@@ -84,9 +63,6 @@ def main():
     # 4) Accumulate N(r), D(r) across all clouds using optimized WK
     total_num = xp.zeros(0, dtype=float)
     total_denom = xp.zeros(0, dtype=float)
-    
-    # Store individual cloud data
-    cloud_correlations = []
 
     for cloud, r_max in zip(cropped_clouds, r_arr):
         r_max = int(_to_numpy(r_max))
@@ -100,23 +76,11 @@ def main():
             padded_cloud, r_max, dtype_fft=xp.float64
         )
 
-        # Store individual cloud data
-        cloud_correlations.append({
-            "N_r": num_temp,
-            "D_r": denom_temp
-        })
-
         # Continue with total accumulation
         num_temp = xp.asarray(num_temp)
         denom_temp = xp.asarray(denom_temp)
         total_num = autocorr_utils.extend_and_add(total_num, num_temp)
         total_denom = autocorr_utils.extend_and_add(total_denom, denom_temp)
-
-    # Save individual cloud correlation data
-    output_path = os.path.join(args.outdir, 
-                              f"{args.prefix}_{LATTICE_SIZE}_seed_{SEED}_corr_raw.json")
-    save_all_correlation_data(cloud_correlations, output_path)
-    print(f"[OK] Wrote per-cloud correlation data to {output_path}")
 
     # 5) Final C(r) and save (one value per line)
     C_r = xp.where(total_denom > 0, total_num / total_denom, xp.nan)
