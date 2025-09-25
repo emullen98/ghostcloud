@@ -11,7 +11,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from utils.image_utils import binarize_by_fill_fraction, threshold_yen, binarize_cloud_method2
+from utils.image_utils import binarize_by_fill_fraction, threshold_yen, binarize_cloud_method2, save_lattice_png
 
 def visualize_thresholding(image_path: str, p_target: float = 0.407, tol: float = 0.05) -> None:
     """
@@ -27,7 +27,7 @@ def visualize_thresholding(image_path: str, p_target: float = 0.407, tol: float 
     try:
         img = np.array(Image.open(image_path).convert('L'))  # Convert to grayscale
         # Invert image so clouds are white (high values)
-        img = 255 - img
+        #img = 255 - img
     except Exception as e:
         print(f"Error loading image: {str(e)}")
         sys.exit(1)
@@ -102,9 +102,16 @@ def visualize_thresholding(image_path: str, p_target: float = 0.407, tol: float 
     plt.tight_layout()
     plt.show()
 
+    # Save the binary masks as PNG files
+    output_dir = Path(image_path).parent / "thresholded_outputs"
+    output_dir.mkdir(exist_ok=True)
+    if yen_result:
+        save_lattice_png(yen_result['mask'], output_dir / "yen_threshold_flipped.png")
+    save_lattice_png(quantile_result['mask'], output_dir / "quantile_threshold_flipped.png")
+
 def main():
     parser = argparse.ArgumentParser(description='Visualize cloud image thresholding')
-    parser.add_argument('image_path', type=str, help='Path to input image')
+    parser.add_argument('--image-path', type=str, help='Path to input image')
     parser.add_argument('--p-target', type=float, default=0.407,
                        help='Target fill fraction (default: 0.407)')
     parser.add_argument('--tolerance', type=float, default=0.05,

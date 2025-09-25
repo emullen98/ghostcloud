@@ -1,5 +1,7 @@
 import numpy as np
 from typing import Optional, Tuple, Dict, Union
+import cv2
+from pathlib import Path
 
 def _rescale_percentiles(
     img: np.ndarray, 
@@ -209,3 +211,82 @@ def binarize_cloud_method2(
         result["method"] = "quantile_no_skimage"
         return result
     
+
+
+
+def edge_binarize(image: np.ndarray, method="sobel", thresh=20) -> np.ndarray:
+    """
+    Simple edge/contrast-based binarizer.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input grayscale image (uint8 or float).
+    method : str, optional
+        Edge detection method. Options: "sobel", "laplacian", "canny".
+    thresh : float, optional
+        Threshold on edge magnitude (for sobel/laplacian). 
+        For canny, this is used as the lower threshold.
+
+    Returns
+    -------
+    mask : np.ndarray
+        Binary mask of detected edges (uint8, {0,255}).
+    """
+
+    # Ensure grayscale
+    if image.ndim == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    image = image.astype(np.float32)
+
+    if method == "sobel":
+        gx = cv2.Sobel(image, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(image, cv2.CV_32F, 0, 1, ksize=3)
+        mag = cv2.magnitude(gx, gy)
+        mask = (mag > thresh).astype(np.uint8) * 255
+
+    elif method == "laplacian":
+        lap = cv2.Laplacian(image, cv2.CV_32F, ksize=3)
+        mag = np.abs(lap)
+        mask = (mag > thresh).astype(np.uint8) * 255
+
+    elif method == "canny":
+        # Here `thresh` is the lower threshold, set upper = 3×lower
+        mask = cv2.Canny(image.astype(np.uint8),
+                         threshold1=thresh,
+                         threshold2=3*thresh)
+
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    return mask
+
+
+def save_lattice_png(lattice: np.ndarray, path: str) -> None:
+    """
+    Save a binary lattice (0/1 array) as a PNG image.
+
+    Parameters
+    ----------
+    lattice : np.ndarray
+        2D array with values 0/1 (binary lattice).
+    path : str
+        Output file path (should end with .png).
+
+    Notes
+    -----
+    - Lattice is converted to uint8 with values {0, 255}.
+    - Saved as grayscale PNG (CV_8U).
+    - PNG is inherently lossless, no extra compression options needed.
+    """
+    # Ensure array is binary {0,1}
+    arr = (lattice > 0).astype(np.uint8) * 255
+
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save as grayscale PNG
+    success = cv2.imwrite(str(out_path), arr)
+    if not success:
+        raise IOError(f"Failed to save lattice to {out_path}")
