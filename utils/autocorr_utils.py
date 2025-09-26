@@ -470,14 +470,17 @@ def compute_radial_autocorr(image, mask_stack):
 class CloudRow:
     """
     Per-cloud row with C(r) and optional boundary C(r).
-    - `cr`     : C(r) for centers = all cloud pixels
-    - `cr_bnd` : C(r) for centers = boundary pixels (4-connected); optional
+    - `cr`       : C(r) for centers = all cloud pixels
+    - `cr_bnd`   : C(r) for centers = boundary pixels (optional)
+    - `threshold`: threshold value used to binarize image (optional)
     """
     cloud_idx: int
     perim: int
     area: int
-    cr: np.ndarray                    # 1D float64 (length r_max+1)
-    cr_bnd: Optional[np.ndarray] = None  # 1D float64 or None
+    cr: np.ndarray
+    cr_bnd: Optional[np.ndarray] = None
+    threshold: Optional[float] = None
+
 
 class ParquetWriter:
     """
@@ -536,26 +539,23 @@ class ParquetWriter:
 
     @staticmethod
     def _rows_to_table(rows: List['CloudRow']) -> pa.Table:
-        """
-        Build a PyArrow table with ragged list columns and nullable cr_bnd.
-        We intentionally use pa.array([...], type=pa.list_(pa.float64()))
-        because it handles raggedness and None entries robustly.
-        """
         cloud_idx = pa.array([r.cloud_idx for r in rows], type=pa.int64())
         perim     = pa.array([r.perim     for r in rows], type=pa.int64())
         area      = pa.array([r.area      for r in rows], type=pa.int64())
 
-        # Python lists of lists (or None) => robust ragged/nullable conversion
-        cr_py      = [r.cr.tolist() for r in rows]
-        cr_bnd_py  = [None if (r.cr_bnd is None) else r.cr_bnd.tolist() for r in rows]
+        cr_py     = [r.cr.tolist() for r in rows]
+        cr_bnd_py = [None if (r.cr_bnd is None) else r.cr_bnd.tolist() for r in rows]
+        thr_py    = [None if (r.threshold is None) else float(r.threshold) for r in rows]
 
-        cr      = pa.array(cr_py,     type=pa.list_(pa.float64()))
-        cr_bnd  = pa.array(cr_bnd_py, type=pa.list_(pa.float64()))  # nullable rows become nulls
+        cr     = pa.array(cr_py,     type=pa.list_(pa.float64()))
+        cr_bnd = pa.array(cr_bnd_py, type=pa.list_(pa.float64()))
+        threshold = pa.array(thr_py, type=pa.float64())  # nullable floats allowed
 
         return pa.table({
             "cloud_idx": cloud_idx,
             "perim":     perim,
             "area":      area,
+            "threshold": threshold,
             "cr":        cr,
-            "cr_bnd":    cr_bnd,   # always present in schema; null where absent
+            "cr_bnd":    cr_bnd,
         })

@@ -10,8 +10,7 @@
 
 # ============================================================
 # Example submit:
-# sbatch --export=ALL,INDIR=data/raw_clouds,OUTDIR=scratch/clouds_yen,PROJECT_ROOT=/u/mbiju2 \
-#        clouds/utils/yen_binarize.sbatch
+# sbatch --export=ALL,INDIR=clouds/cloud_data/cleaned,OUTDIR=scratch/clouds_yen,PROJECT_ROOT=/u/mbiju2 clouds/data_processing_scripts/thresholding/yen_binarize.sbatch
 # ============================================================
 
 set -euo pipefail
@@ -22,8 +21,7 @@ cd "$PROJECT_ROOT"
 INDIR="${INDIR:-data/raw_clouds}"
 OUTDIR="${OUTDIR:-scratch/clouds_yen}"
 
-# --- Environment
-module purge || true
+# --- Environment setup ---
 source clouds/venv/bin/activate
 
 mkdir -p "${OUTDIR}" scratch/logs
@@ -31,6 +29,6 @@ mkdir -p "${OUTDIR}" scratch/logs
 echo "[INFO] Input dir: ${INDIR}"
 echo "[INFO] Output dir: ${OUTDIR}"
 
-srun -u python -u clouds/utils/yen_binarize.py \
+srun -u python -u -m clouds.data_processing_scripts.thresholding.yen_binarize \
   --indir "${INDIR}" \
   --outdir "${OUTDIR}"

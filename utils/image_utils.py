@@ -290,3 +290,43 @@ def save_lattice_png(lattice: np.ndarray, path: str) -> None:
     success = cv2.imwrite(str(out_path), arr)
     if not success:
         raise IOError(f"Failed to save lattice to {out_path}")
+
+def load_gray_float(path: Path) -> np.ndarray:
+    """
+    Load image from path as grayscale float32 (no normalization).
+    If already grayscale, preserves it. Otherwise converts from BGR.
+    """
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise FileNotFoundError(f"Could not read {path}")
+    if img.ndim == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return img.astype(np.float32, copy=False)
+
+def normalize_to_unit(img: np.ndarray) -> np.ndarray:
+    """
+    Normalize array to [0,1] range. If flat (all values equal), returns zeros.
+    """
+    mn, mx = float(img.min()), float(img.max())
+    if mx > mn:
+        return (img - mn) / (mx - mn)
+    return np.zeros_like(img, dtype=np.float32)
+
+def threshold_binary(img: np.ndarray, thr: float) -> np.ndarray:
+    """
+    Apply threshold to normalized grayscale image.
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        Grayscale float32 image, assumed in [0,1].
+    thr : float
+        Threshold in [0,1]. Pixels > thr become 1, else 0.
+    
+    Returns
+    -------
+    np.ndarray of dtype uint8 with values {0,1}
+    """
+    if not (0.0 <= thr <= 1.0):
+        raise ValueError(f"Threshold {thr} not in [0,1]")
+    return (img > thr)
