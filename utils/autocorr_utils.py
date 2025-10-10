@@ -12,11 +12,14 @@ Philosophy:
 
 from dataclasses import dataclass
 from . import config
-from typing import Tuple, List, Literal, Optional
+from typing import Tuple, List, Literal, Optional, Dict
 import numpy as np
 import os
 import pyarrow as pa
 import pyarrow.parquet as pq
+import scipy.ndimage as ndimage
+from clouds.utils.cloud_utils import compute_perimeter as compute_perimeter4c
+
 
 # ---------------------------
 # Backend selection (NumPy/CuPy)
@@ -469,29 +472,85 @@ def compute_radial_autocorr(image, mask_stack):
 @dataclass
 class CloudRow:
     """
-    Per-cloud row with C(r) and optional boundary C(r).
-    - `cr`       : C(r) for centers = all cloud pixels
-    - `cr_bnd`   : C(r) for centers = boundary pixels (optional)
-    - `threshold`: threshold value used to binarize image (optional)
+    Per-cloud row with C(r), optional boundary C(r), and optional boundary radial profile.
+
+    Geometry
+    --------
+    - cloud_idx : int
+    - perim     : int (4-connected, pixel-edge units)
+    - area      : int
+
+    Optional Correlations
+    ---------------------
+    - cr        : np.ndarray | None        # C(r) for centers = all cloud pixels
+    - cr_bnd    : np.ndarray | None        # C(r) for centers = boundary pixels
+
+    Optional Numerators/Denominators (for downstream aggregation)
+    -------------------------------------------------------------
+    - num_all   : np.ndarray | None
+    - den_all   : np.ndarray | None
+    - num_bnd   : np.ndarray | None
+    - den_bnd   : np.ndarray | None
+
+    Optional Experiment Tags
+    ------------------------
+    - threshold : float | None            # used by image-thresholding pipeline (nullable)
+    - p_val     : float | None            # used by site-percolation pipeline (nullable)
+
+    Optional Boundary Radial Profile (this request)
+    -----------------------------------------------
+    - rp_r       : np.ndarray | None   # r-bin centers
+    - rp_counts  : np.ndarray | None   # raw counts per r-bin
+    - rp_pdf     : np.ndarray | None   # counts normalized as a density over r
+    - rp_f_ring  : np.ndarray | None   # optional ring-corrected series (counts / (2π r Δr))
     """
     cloud_idx: int
     perim: int
     area: int
-    cr: np.ndarray
+
+    # Optional C(r) arrays
+    cr: Optional[np.ndarray] = None
     cr_bnd: Optional[np.ndarray] = None
+
+    # Optional raw accumulators
+    num_all: Optional[np.ndarray] = None
+    den_all: Optional[np.ndarray] = None
+    num_bnd: Optional[np.ndarray] = None
+    den_bnd: Optional[np.ndarray] = None
+
+    # Optional experiment tags
     threshold: Optional[float] = None
+    p_val: Optional[float] = None
+
+    # Optional boundary radial profile
+    rp_r: Optional[np.ndarray] = None
+    rp_counts: Optional[np.ndarray] = None
+    rp_pdf: Optional[np.ndarray] = None
+    rp_f_ring: Optional[np.ndarray] = None
 
 
 class ParquetWriter:
     """
-    Append-style writer for per-cloud C(r).
+    Append-style writer for per-cloud outputs, now including optional radial profile columns.
 
     Columns:
       - cloud_idx (int64)
       - perim     (int64)
       - area      (int64)
-      - cr        (List<float64>)                 # required
-      - cr_bnd    (List<float64>, nullable)       # optional per row
+      - threshold (float64, nullable)
+      - p_val     (float64, nullable)
+
+      - cr        (List<float64>, nullable)
+      - cr_bnd    (List<float64>, nullable)
+      - num_all   (List<float64>, nullable)
+      - den_all   (List<float64>, nullable)
+      - num_bnd   (List<float64>, nullable)
+      - den_bnd   (List<float64>, nullable)
+
+      - rp_r      (List<float64>, nullable)      # NEW
+      - rp_counts (List<float64>, nullable)      # NEW
+      - rp_pdf    (List<float64>, nullable)      # NEW
+      - rp_f_ring (List<float64>, nullable)      # NEW
 
     Writes to sharded part files for safe incremental appends.
     """
@@ -507,16 +566,33 @@ class ParquetWriter:
         self._part_idx = 0
 
     def add(self, row: CloudRow):
-        # normalize dtypes
-        row.cr = np.asarray(row.cr, dtype=np.float64)
-        if row.cr_bnd is not None:
-            row.cr_bnd = np.asarray(row.cr_bnd, dtype=np.float64)
+        # normalize dtype for all present arrays
+        def _as_f64(x):
+            return None if x is None else np.asarray(x, dtype=np.float64)
 
-        # queue & update size estimate (include both lists if present)
+        row.cr       = _as_f64(row.cr)
+        row.cr_bnd   = _as_f64(row.cr_bnd)
+        row.num_all  = _as_f64(row.num_all)
+        row.den_all  = _as_f64(row.den_all)
+        row.num_bnd  = _as_f64(row.num_bnd)
+        row.den_bnd  = _as_f64(row.den_bnd)
+
+        # NEW: radial profile arrays
+        row.rp_r       = _as_f64(row.rp_r)
+        row.rp_counts  = _as_f64(row.rp_counts)
+        row.rp_pdf     = _as_f64(row.rp_pdf)
+        row.rp_f_ring  = _as_f64(row.rp_f_ring)
+
+        # queue row
         self._rows.append(row)
-        size = row.cr.nbytes + 32
-        if row.cr_bnd is not None:
-            size += row.cr_bnd.nbytes + 16
+
+        # update size estimate conservatively
+        size = 32  # base overhead
+        for arr in (row.cr, row.cr_bnd,
+                    row.num_all, row.den_all, row.num_bnd, row.den_bnd,
+                    row.rp_r, row.rp_counts, row.rp_pdf, row.rp_f_ring):
+            if arr is not None:
+                size += arr.nbytes + 16
         self._approx_bytes += size
 
         need_row_flush = (self.rows_per_flush is not None) and (len(self._rows) >= self.rows_per_flush)
@@ -539,23 +615,255 @@ class ParquetWriter:
 
     @staticmethod
     def _rows_to_table(rows: List['CloudRow']) -> pa.Table:
+        # scalars
         cloud_idx = pa.array([r.cloud_idx for r in rows], type=pa.int64())
         perim     = pa.array([r.perim     for r in rows], type=pa.int64())
         area      = pa.array([r.area      for r in rows], type=pa.int64())
-
-        cr_py     = [r.cr.tolist() for r in rows]
-        cr_bnd_py = [None if (r.cr_bnd is None) else r.cr_bnd.tolist() for r in rows]
         thr_py    = [None if (r.threshold is None) else float(r.threshold) for r in rows]
+        pval_py   = [None if (r.p_val    is None) else float(r.p_val)     for r in rows]
+        threshold = pa.array(thr_py, type=pa.float64())
+        p_val     = pa.array(pval_py, type=pa.float64())
 
-        cr     = pa.array(cr_py,     type=pa.list_(pa.float64()))
-        cr_bnd = pa.array(cr_bnd_py, type=pa.list_(pa.float64()))
-        threshold = pa.array(thr_py, type=pa.float64())  # nullable floats allowed
+        # helper to coerce optional 1D numpy arrays -> python lists (or None)
+        def _opt_list(getter):
+            out = []
+            for r in rows:
+                arr = getter(r)
+                out.append(None if arr is None else arr.tolist())
+            return out
+
+        list_f64 = pa.list_(pa.float64())
+
+        cr        = pa.array(_opt_list(lambda r: r.cr),        type=list_f64)
+        cr_bnd    = pa.array(_opt_list(lambda r: r.cr_bnd),    type=list_f64)
+        num_all   = pa.array(_opt_list(lambda r: r.num_all),   type=list_f64)
+        den_all   = pa.array(_opt_list(lambda r: r.den_all),   type=list_f64)
+        num_bnd   = pa.array(_opt_list(lambda r: r.num_bnd),   type=list_f64)
+        den_bnd   = pa.array(_opt_list(lambda r: r.den_bnd),   type=list_f64)
+
+        # NEW: radial profile columns
+        rp_r       = pa.array(_opt_list(lambda r: r.rp_r),       type=list_f64)
+        rp_counts  = pa.array(_opt_list(lambda r: r.rp_counts),  type=list_f64)
+        rp_pdf     = pa.array(_opt_list(lambda r: r.rp_pdf),     type=list_f64)
+        rp_f_ring  = pa.array(_opt_list(lambda r: r.rp_f_ring),  type=list_f64)
 
         return pa.table({
             "cloud_idx": cloud_idx,
             "perim":     perim,
             "area":      area,
             "threshold": threshold,
+            "p_val":     p_val,
+
             "cr":        cr,
             "cr_bnd":    cr_bnd,
+            "num_all":   num_all,
+            "den_all":   den_all,
+            "num_bnd":   num_bnd,
+            "den_bnd":   den_bnd,
+
+            "rp_r":       rp_r,
+            "rp_counts":  rp_counts,
+            "rp_pdf":     rp_pdf,
+            "rp_f_ring":  rp_f_ring,
         })
+
+
+# =========================
+# Boundary radial profiles
+# =========================
+
+def compute_center_for_cloud(
+    cloud_uint8,
+    method: Literal["com","max_inscribed"] = "com"
+) -> Tuple[float, float]:
+    """
+    Center for a flood-filled, tightly-cropped cloud.
+    Returns (cy, cx) as Python floats (row, col).
+
+    method:
+      - "com"           : center of mass
+      - "max_inscribed" : argmax of Euclidean distance transform inside cloud
+    """
+    # ensure NumPy view for center math / EDT
+    m_np = to_numpy((cloud_uint8 != 0).astype(np.uint8, copy=False))
+    if not m_np.any():
+        raise ValueError("compute_center_for_cloud: empty mask.")
+
+    if method == "com":
+        ys, xs = np.nonzero(m_np)
+        return float(ys.mean()), float(xs.mean())
+
+    if method == "max_inscribed":
+        dt = ndimage.distance_transform_edt(m_np)
+        cy, cx = np.unravel_index(int(np.argmax(dt)), dt.shape)
+        return float(cy), float(cx)
+
+    raise ValueError(f"Unknown center method: {method}")
+
+
+def boundary_distances(
+    cloud_uint8,
+    center: Optional[Tuple[float,float]] = None,
+    center_method: Literal["com","max_inscribed"] = "com",
+    return_coords: bool = False
+) -> Dict[str, np.ndarray]:
+    """
+    Distances from chosen center to *boundary pixels* of a tight, flood-filled cloud.
+
+    Returns (NumPy on host):
+      - 'dist'     : (N,) float64 distances
+      - 'center'   : (2,) float64 (cy, cx)
+      - 'area'     : int area (|S_i|)
+      - 'perim_4c' : int 4-connected perimeter (pixel-edge units) via cloud utils
+      - 'coords'   : optional (N,2) int [y,x] boundary pixel coords
+    """
+    # boundary via your existing helper (xp-aware)
+    bmask = make_boundary_mask4(cloud_uint8.astype(xp.uint8, copy=False))
+
+    ys_xp, xs_xp = xp.nonzero(bmask)
+    if ys_xp.size == 0:
+        raise ValueError("boundary_distances: no boundary pixels found.")
+
+    # center
+    if center is None:
+        cy, cx = compute_center_for_cloud(cloud_uint8, method=center_method)
+    else:
+        cy, cx = float(center[0]), float(center[1])
+
+    # move coords to host for distance math
+    ys = to_numpy(ys_xp).astype(np.float64, copy=False)
+    xs = to_numpy(xs_xp).astype(np.float64, copy=False)
+    dist = np.sqrt((xs - cx)**2 + (ys - cy)**2)
+
+    # area & perimeter via cloud utils (on NumPy bool array)
+    cloud_np_bool = to_numpy(cloud_uint8).astype(bool, copy=False)
+    area = int(np.count_nonzero(cloud_np_bool))
+    perim_4c = int(compute_perimeter4c(cloud_np_bool))
+
+    out = {
+        "dist": dist,
+        "center": np.array([cy, cx], dtype=np.float64),
+        "area": area,
+        "perim_4c": perim_4c,
+    }
+    if return_coords:
+        out["coords"] = np.stack([ys.astype(np.int64, copy=False),
+                                  xs.astype(np.int64, copy=False)], axis=1)
+    return out
+
+
+def radial_histogram_boundary(
+    r: np.ndarray,
+    bin_width: float = 1.0,
+    r_max: Optional[float] = None,
+    include_zero_bin: bool = False,
+    make_pdf: bool = True,
+    ring_corrected: bool = False,
+    subpixel_splat: bool = True
+) -> Dict[str, np.ndarray]:
+    """
+    Build radial histogram(s) from boundary distances (NumPy in/out).
+      - 'counts' (raw) is the primary curve to inspect first.
+      - 'pdf' integrates to 1 over r (if make_pdf=True).
+      - Optional 'f_ring' = counts / (2π r Δr).
+      - 'subpixel_splat' linearly splits samples between neighboring bins.
+    """
+    if r.size == 0:
+        raise ValueError("radial_histogram_boundary: empty distance array.")
+    r = np.asarray(r, dtype=np.float64)
+
+    rmax = float(np.ceil(r.max())) if r_max is None else float(r_max)
+    start = 0.0 if include_zero_bin else float(np.floor(r.min()/bin_width)*bin_width)
+
+    edges = np.arange(start, rmax + bin_width + 1e-12, bin_width, dtype=np.float64)
+    centers = 0.5*(edges[:-1] + edges[1:])
+    delta = (edges[1:] - edges[:-1])
+
+    K = centers.size
+    counts = np.zeros(K, dtype=np.float64)
+
+    if not subpixel_splat:
+        h, _ = np.histogram(r, bins=edges)
+        counts = h.astype(np.float64, copy=False)
+    else:
+        idxf = (r - start) / bin_width
+        i0 = np.floor(idxf).astype(np.int64)
+        frac = idxf - i0
+        m0 = (i0 >= 0) & (i0 < K)
+        if m0.any():
+            counts += np.bincount(i0[m0], weights=(1.0 - frac[m0]), minlength=K)
+        i1 = i0 + 1
+        m1 = (i1 >= 0) & (i1 < K)
+        if m1.any():
+            counts += np.bincount(i1[m1], weights=frac[m1], minlength=K)
+
+    result = {"bin_edges": edges, "r_centers": centers, "counts": counts}
+
+    if make_pdf:
+        total = counts.sum()
+        result["pdf"] = counts / (total * delta) if total > 0 else np.zeros_like(counts)
+
+    if ring_corrected:
+        ring_len = 2.0*np.pi*centers*delta
+        safe = ring_len > 0
+        f_ring = np.zeros_like(counts)
+        f_ring[safe] = counts[safe] / ring_len[safe]
+        result["f_ring"] = f_ring
+        result["ring_len"] = ring_len
+
+    return result
+
+
+def radius_scale(
+    r_centers: np.ndarray,
+    mask_area: int,
+    method: Literal["Req","percentile"] = "Req",
+    p_low: float = 5.0,
+    p_high: float = 95.0
+) -> np.ndarray:
+    """
+    r -> s scaling for within-cloud overlays (not used until you compare clouds).
+      - "Req"        : s = r / R_eq, with R_eq = sqrt(area/pi)
+      - "percentile" : s = (r - r_pLow)/(r_pHigh - r_pLow)
+    """
+    r_centers = np.asarray(r_centers, dtype=np.float64)
+    if method == "Req":
+        R_eq = np.sqrt(float(mask_area) / np.pi)
+        if not np.isfinite(R_eq) or R_eq <= 0:
+            raise ValueError("radius_scale: non-positive R_eq.")
+        return r_centers / R_eq
+    elif method == "percentile":
+        rlo, rhi = np.percentile(r_centers, [p_low, p_high])
+        denom = max(rhi - rlo, 1e-9)
+        return (r_centers - rlo) / denom
+    else:
+        raise ValueError(f"Unknown scaling method: {method}")
+
+
+def boundary_radial_profile(
+    cloud_uint8,
+    bin_width: float = 1.0,
+    center_method: Literal["com","max_inscribed"] = "com",
+    ring_corrected: bool = False,
+    subpixel_splat: bool = True
+) -> Dict[str, np.ndarray]:
+    """
+    One-call profile for a single cloud.
+    Returns:
+      'r_centers','counts','pdf' (and optionally 'f_ring','ring_len') +
+      'area','perim_4c','center'
+    """
+    d = boundary_distances(
+        cloud_uint8,
+        center=None,
+        center_method=center_method,
+        return_coords=False
+    )
+    h = radial_histogram_boundary(
+        d["dist"],
+        bin_width=bin_width,
+        make_pdf=True,
+        ring_corrected=ring_corrected,
+        subpixel_splat=subpixel_splat
+    )
+    return {**h, "area": d["area"], "perim_4c": d["perim_4c"], "center": d["center"]}

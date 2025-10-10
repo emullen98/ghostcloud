@@ -32,6 +32,12 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 : "${ROWS_PER_FLUSH:=400}"
 : "${MAX_BYTES_PER_FLUSH:=$((128*1024*1024))}"
 
+# New optional flags for what to persist per cloud
+: "${SAVE_CR:=0}"
+: "${SAVE_CR_BND:=0}"
+: "${SAVE_NUMDEN:=1}"   # default ON since aggregate needs it
+
+
 # --- Environment
 module load cuda/12.8
 source clouds/venv/bin/activate
@@ -44,6 +50,7 @@ echo "[INFO] IMG=${IMG}"
 echo "[INFO] OUTDIR=${OUTDIR}"
 echo "[INFO] THRESHOLDS_FILE=${THRESHOLDS_FILE}"
 echo "[INFO] MIN_AREA=${MIN_AREA}, MAX_AREA=${MAX_AREA}"
+echo "[INFO] SAVE_CR=${SAVE_CR}, SAVE_CR_BND=${SAVE_CR_BND}, SAVE_NUMDEN=${SAVE_NUMDEN}"
 
 # --- Run Python worker
 ARGS=( --image "${IMG}"
@@ -54,6 +61,12 @@ ARGS=( --image "${IMG}"
        --prefix "${PREFIX}"
        --rows-per-flush "${ROWS_PER_FLUSH}"
        --max-bytes-per-flush "${MAX_BYTES_PER_FLUSH}" )
+
+# Conditional CLI flags
+[[ "${SAVE_CR}" -eq 1 ]] && ARGS+=( --save-cr )
+[[ "${SAVE_CR_BND}" -eq 1 ]] && ARGS+=( --save-cr-bnd )
+[[ "${SAVE_NUMDEN}" -eq 1 ]] && ARGS+=( --save-numden )
+
 
 srun -u python -u -m clouds.data_processing_scripts.image_proc.threshold_wk_from_image "${ARGS[@]}"
 

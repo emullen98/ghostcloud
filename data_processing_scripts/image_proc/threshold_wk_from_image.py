@@ -80,6 +80,14 @@ def main():
     ap.add_argument("--prefix", type=str, default="thr_wk")
     ap.add_argument("--rows-per-flush", type=int, default=400)
     ap.add_argument("--max-bytes-per-flush", type=int, default=128 * 1024 * 1024)
+    ap.add_argument("--save-cr", action="store_true",
+                    help="Save per-cloud C(r) for centers=all to Parquet (default: off).")
+    ap.add_argument("--save-cr-bnd", action="store_true",
+                    help="Save per-cloud C(r) for centers=boundary to Parquet (default: off).")
+    ap.add_argument("--save-numden", action="store_true",
+                    help="Save per-cloud numerators/denominators (all & boundary) to Parquet (default: on).")
+    ap.set_defaults(save_numden=True)
+
     args = ap.parse_args()
 
     img_path = Path(args.image)
@@ -175,14 +183,30 @@ def main():
                     else None
                 )
 
-                # Per-cloud row with threshold
+                # Decide what to persist
+                cr_save      = _to_numpy(cr_all) if args.save_cr else None
+                cr_bnd_save  = (None if (cr_bnd is None or not args.save_cr_bnd) else _to_numpy(cr_bnd))
+
+                num_all_save = _to_numpy(num_all) if args.save_numden else None
+                den_all_save = _to_numpy(den_all) if args.save_numden else None
+                num_bnd_save = None
+                den_bnd_save = None
+                if args.save_numden and cr_bnd is not None:
+                    num_bnd_save = _to_numpy(num_bnd)
+                    den_bnd_save = _to_numpy(den_bnd)
+
+                # Per-cloud row with threshold + optional fields
                 writer.add(
                     CloudRow(
                         cloud_idx=cloud_counter,
                         perim=int(perim),
                         area=int(area),
-                        cr=_to_numpy(cr_all),
-                        cr_bnd=(None if cr_bnd is None else _to_numpy(cr_bnd)),
+                        cr=cr_save,
+                        cr_bnd=cr_bnd_save,
+                        num_all=num_all_save,
+                        den_all=den_all_save,
+                        num_bnd=num_bnd_save,
+                        den_bnd=den_bnd_save,
                         threshold=float(t),
                     )
                 )
@@ -242,7 +266,10 @@ def main():
         "rows_per_flush": args.rows_per_flush,
         "max_bytes_per_flush": args.max_bytes_per_flush,
         "xp_backend": xp_backend,
-        "num_clouds_by_threshold": num_clouds_by_threshold,  # <-- added
+        "num_clouds_by_threshold": num_clouds_by_threshold,
+        "save_cr": args.save_cr,
+        "save_cr_bnd": args.save_cr_bnd,
+        "save_numden": args.save_numden,
     }
     with open(meta_outfile, "w") as f:
         json.dump(meta, f, indent=2)
