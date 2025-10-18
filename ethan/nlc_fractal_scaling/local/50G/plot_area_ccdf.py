@@ -3,8 +3,8 @@ Created Oct 18 2025
 Updated Oct 18 2025
 
 (LOCAL)
--- Plot CCDF of areas for 30G threshold
--- From Monte Carlo power-law fitting, area exponent is 1.803...
+-- Plot CCDF of areas for 50G threshold
+-- From Monte Carlo power-law fitting, area exponent is 1.735...
 """
 import matplotlib.pyplot as plt
 import sys
@@ -14,11 +14,11 @@ import helper_scripts as hs
 from _get_data import get_data
 
 fig, ax = plt.subplots(1, 1, constrained_layout=True)
-threshold = 30
+threshold = 50
 filename = f'/Users/emullen98/Downloads/og_clouds/{threshold}G_v4.csv'
-mc_exp = -1.803  # From fit_mc_area.py results
-mc_amin = 46  # From fit_mc_area.py results
-mc_amax = 5649  # From fit_mc_area.py results
+mc_exp = -1.73  # From fit_mc_area.py results
+mc_amin = 27  # From fit_mc_area.py results
+mc_amax = 1482  # From fit_mc_area.py results
 plot_save_loc = hs.get_pwd()
 
 area, perims = get_data(csvloc=filename)
