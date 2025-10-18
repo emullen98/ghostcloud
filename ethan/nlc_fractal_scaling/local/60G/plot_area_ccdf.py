@@ -3,8 +3,8 @@ Created Oct 18 2025
 Updated Oct 18 2025
 
 (LOCAL)
--- Plot CCDF of areas for 30G threshold
--- From Monte Carlo power-law fitting, area exponent is 1.803...
+-- Plot CCDF of areas for 60G threshold
+-- From Monte Carlo power-law fitting, area exponent is 1.597...
 """
 import matplotlib.pyplot as plt
 import sys
@@ -14,11 +14,11 @@ import helper_scripts as hs
 from _get_data import get_data
 
 fig, ax = plt.subplots(1, 1, constrained_layout=True)
-threshold = 30
+threshold = 60
 filename = f'/Users/emullen98/Downloads/og_clouds/{threshold}G_v4.csv'
-mc_exp = -1.803  # From fit_mc_area.py results
-mc_amin = 46  # From fit_mc_area.py results
-mc_amax = 5649  # From fit_mc_area.py results
+mc_exp = -1.60  # From fit_mc_area.py results
+mc_amin = 15  # From fit_mc_area.py results
+mc_amax = 999  # From fit_mc_area.py results 
 plot_save_loc = hs.get_pwd()
 
 area, perims = get_data(csvloc=filename)
@@ -27,7 +27,7 @@ ccdf_x, ccdf_y = hs.ccdf(area)
 x, y = hs.linemaker(mc_exp + 1, [100, 0.4], 30, 700)
 
 ax.loglog(ccdf_x, ccdf_y, '.', color='grey', label='$\\text{CCDF}(A) \\sim A^{-(\\kappa_{\\text{area}} - 1)}$')
-ax.loglog(x, y, color='r', linestyle='dashed', label=f'MC fit $\\kappa_{{\\text{{area}}}} = {mc_exp}$')
+ax.loglog(x, y, color='r', linestyle='dashed', label=f'MC fit $\\kappa_{{\\text{{area}}}} = {mc_exp:.2f}$')
 ax.axvline(x=mc_amin, color='black', linestyle='dotted', label=f'$A_{{\\min}} = {mc_amin} \\text{{ pixels}}$')
 ax.axvline(x=mc_amax, color='black', linestyle='dashdot', label=f'$A_{{\\max}} = {mc_amax} \\text{{ pixels}}$')
 ax.set_xlim(10, 1e4)
@@ -35,5 +35,5 @@ ax.set_ylim(bottom=1e-4)
 ax.set_title(f'Area CCDF for {threshold}G threshold')
 ax.set_ylabel('$\\text{Pr}(\\text{area} \\geq A)$')
 ax.set_xlabel('$A  /  25\\text{ km}^2$')
-ax.legend()
+ax.legend(loc='lower center')
 fig.savefig(f'{plot_save_loc}/area_ccdf_{threshold}G.png')
