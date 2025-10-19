@@ -1,8 +1,6 @@
 """
 Created Nov 18 2024
 Updated Nov 18 2024
-
-
 """
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -11,28 +9,6 @@ import sys
 import itertools
 sys.path.append('/nlc_image_analysis/local')
 import helper_scripts as hs
-
-plt.rcParams.update({
-    "pgf.texsystem": "pdflatex",
-    "text.usetex": True,
-    "font.family": "serif",
-    "pgf.rcfonts": False,
-    'text.latex.preamble': r'\usepackage{amsmath} \usepackage{gensymb}',
-    'lines.linewidth': 4,
-    'legend.fontsize': 20,
-    'axes.titlesize': 20,
-    'axes.linewidth': 1.25,
-    'axes.labelsize': 20,
-    'xtick.labelsize': 20,
-    'ytick.labelsize': 20,
-    'xtick.major.size': 5,
-    'ytick.major.size': 5,
-    'xtick.major.width': 1.25,
-    'ytick.major.width': 1.25,
-    'xtick.major.pad': 10,
-    'savefig.dpi': 300,
-    'savefig.format': 'png'
-})
 
 normalized_thresh = mcolors.Normalize(vmin=30, vmax=60)
 cmap = hs.truncate_cm(cmocean.cm.thermal)
@@ -58,4 +34,4 @@ ax.set_ylabel('$\\text{Pr}(\\text{area} \\geq A)$')
 ax.set_xlabel('$A  /  25\\text{ km}^2$')
 ax.legend(loc='lower left', fancybox=True, shadow=True)
 
-fig.savefig('../../Plots/Fractal_scaling/no_fits/area_ccdf_all_thresh.png')
+fig.savefig('./area_ccdf_all_thresh.png')

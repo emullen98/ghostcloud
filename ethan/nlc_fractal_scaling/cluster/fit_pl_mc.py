@@ -3,8 +3,8 @@ Created Nov 19 2024
 Updated Nov 19 2024
 
 (IN CLUSTER)
-Uses default parameters / discrete setting in find_pl_montecarlo to extract best-fit xmin, xmax, and power-law exponents
-to a particular threshold's area & perimeter data.
+-- Uses default parameters / discrete setting in find_pl_montecarlo to extract best-fit xmin, xmax, and power-law exponents to a particular threshold's area & perimeter data.
+
 """
 import numpy as np
 import sys
