@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-threshold_wk_from_image.py
+threshold_autocorr_bd_from_image.py
 
 For a given grayscale image:
   - normalize to [0,1]
   - for each threshold in the list: binarize -> flood fill -> WK autocorr
-  - save per-cloud rows (Parquet, sharded) with threshold info
+  - per-cloud: write WK fields (opt), + boundary-distance histogram, COM, Rg
   - accumulate numerators/denominators across ALL thresholds
   - save a single aggregate C(r) and C(r)_bnd per image
   - save a metadata JSON with input file and parameters
@@ -22,15 +22,21 @@ import numpy as np
 import clouds.utils.autocorr_utils as autocorr_utils
 import clouds.utils.cloud_utils as cloud_utils
 from clouds.utils.autocorr_utils import xp, xp_backend
+
 from clouds.utils.image_utils import (
     load_gray_float,
     normalize_to_unit,
     threshold_binary,
 )
 
-# import your updated parquet helpers
-from clouds.utils.autocorr_utils import ParquetWriter, CloudRow
-
+# Parquet helpers + minimal metrics (added utils)
+from clouds.utils.autocorr_utils import (
+    ParquetWriter, CloudRow,
+    compute_com,                # NEW
+    radius_of_gyration,         # NEW
+    boundary_distances_min,     # NEW
+    boundary_histogram_min,     # NEW
+)
 
 # ---------------------------
 # Helpers
@@ -51,7 +57,6 @@ def parse_thresholds_file(path: str) -> List[float]:
             if not (0.0 <= v <= 1.0):
                 raise ValueError(f"Threshold {v} from {path} not in [0,1]")
             vals.append(v)
-    # dedupe while preserving order
     seen = set()
     out: List[float] = []
     for v in vals:
@@ -65,7 +70,7 @@ def parse_thresholds_file(path: str) -> List[float]:
 # ---------------------------
 def main():
     ap = argparse.ArgumentParser(
-        description="Threshold + WK datagen for a single image across thresholds."
+        description="Threshold + WK + boundary-distance per-cloud datagen for a single image."
     )
     ap.add_argument("--image", type=str, required=True)
     ap.add_argument(
@@ -76,10 +81,12 @@ def main():
     )
     ap.add_argument("--min-area", type=int, default=1000)
     ap.add_argument("--max-area", type=int, default=7_500_000)
-    ap.add_argument("--outdir", type=str, default="scratch/threshold_wk")
-    ap.add_argument("--prefix", type=str, default="thr_wk")
+    ap.add_argument("--outdir", type=str, default="scratch/threshold_autocorr_bd")
+    ap.add_argument("--prefix", type=str, default="thr_autocorr_bd")
     ap.add_argument("--rows-per-flush", type=int, default=400)
     ap.add_argument("--max-bytes-per-flush", type=int, default=128 * 1024 * 1024)
+
+    # WK save controls (unchanged defaults)
     ap.add_argument("--save-cr", action="store_true",
                     help="Save per-cloud C(r) for centers=all to Parquet (default: off).")
     ap.add_argument("--save-cr-bnd", action="store_true",
@@ -88,6 +95,10 @@ def main():
                     help="Save per-cloud numerators/denominators (all & boundary) to Parquet (default: on).")
     ap.set_defaults(save_numden=True)
 
+    # Boundary-distance controls (shared Δr; zero-origin alignment)
+    ap.add_argument("--bd-bin-width", type=float, default=1.0,
+                    help="Δr for boundary-distance histogram (shared across clouds).")
+
     args = ap.parse_args()
 
     img_path = Path(args.image)
@@ -95,22 +106,25 @@ def main():
     run_tag = f"{args.prefix}_{img_stem}"
 
     os.makedirs(args.outdir, exist_ok=True)
+
+    # aggregate outputs (names kept similar, script renamed)
     cr_outfile_all = os.path.join(args.outdir, f"{run_tag}_Cr.txt")
     cr_outfile_bnd = os.path.join(args.outdir, f"{run_tag}_Cr_bnd.txt")
-    meta_outfile = os.path.join(args.outdir, f"{run_tag}_meta.json")
+    meta_outfile   = os.path.join(args.outdir, f"{run_tag}_meta.json")
 
+    # per-cloud parquet shard dir + writer
     per_cloud_dir = os.path.join(args.outdir, "per_cloud", run_tag)
     os.makedirs(per_cloud_dir, exist_ok=True)
     writer = ParquetWriter(
         outdir=per_cloud_dir,
-        basename="cr",
+        basename="cloud_metrics",   # NEW basename (we store more than C(r))
         rows_per_flush=args.rows_per_flush,
         max_bytes_per_flush=args.max_bytes_per_flush,
     )
 
     thresholds = parse_thresholds_file(args.thresholds_file)
 
-    print("=== Threshold + WK datagen ===")
+    print("=== Threshold + WK + BD datagen ===")
     print(f"Image:                 {img_path}")
     print(f"Run tag:               {run_tag}")
     print(f"Thresholds:            {thresholds}")
@@ -118,13 +132,14 @@ def main():
     print(f"Outdir:                {args.outdir}")
     print(f"XP backend:            {xp_backend}")
     print(f"Per-cloud parquet dir: {per_cloud_dir}")
+    print(f"BD bin width (Δr):     {args.bd_bin_width}")
     print("==============================")
 
     # Load + normalize image
     raw = load_gray_float(img_path)
     img01 = normalize_to_unit(raw)
 
-    # Aggregated totals across ALL thresholds
+    # Aggregated totals across ALL thresholds (WK)
     total_num_all = xp.zeros(0, dtype=xp.float64)
     total_den_all = xp.zeros(0, dtype=xp.float64)
     total_num_bnd = xp.zeros(0, dtype=xp.float64)
@@ -146,9 +161,8 @@ def main():
                 filled, min_area=args.min_area, max_area=args.max_area
             )
 
-            # Save count *even if zero*; JSON keys must be strings
             num_clouds_by_threshold[f"{t:.12g}"] = len(cropped_clouds)
-            
+
             if len(cropped_clouds) == 0:
                 print(f"[INFO] threshold={t:.3f}: no clouds in area range; skipping.")
                 continue
@@ -164,9 +178,12 @@ def main():
             for r_max, cloud in zip(r_arr, cropped_clouds):
                 r_max = int(_to_numpy(r_max))
                 cloud_xp = xp.asarray(cloud, dtype=xp.uint8)
-                perim = cloud_utils.compute_perimeter(cloud)
-                area = cloud_utils.compute_area(cloud)
 
+                # --- geometry tags
+                perim = cloud_utils.compute_perimeter(cloud)
+                area  = cloud_utils.compute_area(cloud)
+
+                # --- WK autocorr (all + boundary)
                 padded, _ = autocorr_utils.pad_for_wk(cloud_xp, r_max, guard=0)
                 out = autocorr_utils.wk_radial_autocorr_dual(
                     padded, r_max, dtype_fft=xp.float64
@@ -183,7 +200,16 @@ def main():
                     else None
                 )
 
-                # Decide what to persist
+                # --- minimal boundary-distance metrics (shared Δr; zero-origin)
+                cy, cx = compute_com(cloud)  # floats (row, col)
+                rgA = radius_of_gyration(cloud, center=(cy, cx), pixels="area")
+                r_bnd = boundary_distances_min(cloud, center=(cy, cx))
+                bd_r, bd_counts = boundary_histogram_min(
+                    r_bnd, bin_width=args.bd_bin_width, include_zero_bin=True
+                )
+                Nb = int(r_bnd.size)
+
+                # --- decide what to persist (WK)
                 cr_save      = _to_numpy(cr_all) if args.save_cr else None
                 cr_bnd_save  = (None if (cr_bnd is None or not args.save_cr_bnd) else _to_numpy(cr_bnd))
 
@@ -195,49 +221,57 @@ def main():
                     num_bnd_save = _to_numpy(num_bnd)
                     den_bnd_save = _to_numpy(den_bnd)
 
-                # Per-cloud row with threshold + optional fields
+                # --- per-cloud row
                 writer.add(
                     CloudRow(
                         cloud_idx=cloud_counter,
                         perim=int(perim),
                         area=int(area),
+
+                        # WK (optional)
                         cr=cr_save,
                         cr_bnd=cr_bnd_save,
                         num_all=num_all_save,
                         den_all=den_all_save,
                         num_bnd=num_bnd_save,
                         den_bnd=den_bnd_save,
+
+                        # threshold tag
                         threshold=float(t),
+
+                        # NEW: minimal boundary-distance + COM/Rg tags
+                        com=np.array([cy, cx], dtype=np.float64),
+                        rg_area=float(rgA),
+                        rg_bnd=None,  # filled later if you choose boundary Rg
+
+                        bd_r=bd_r,
+                        bd_counts=bd_counts,
+
+                        bd_bin_width=float(args.bd_bin_width),
+                        center_method="com",
+                        boundary_connectivity="4c",
+                        bd_n=Nb,
                     )
                 )
                 cloud_counter += 1
 
-                # Aggregate across ALL thresholds
-                total_num_all = autocorr_utils.extend_and_add(
-                    total_num_all, xp.asarray(num_all)
-                )
-                total_den_all = autocorr_utils.extend_and_add(
-                    total_den_all, xp.asarray(den_all)
-                )
+                # --- aggregate across ALL thresholds (WK only)
+                total_num_all = autocorr_utils.extend_and_add(total_num_all, xp.asarray(num_all))
+                total_den_all = autocorr_utils.extend_and_add(total_den_all, xp.asarray(den_all))
                 if cr_bnd is not None:
-                    total_num_bnd = autocorr_utils.extend_and_add(
-                        total_num_bnd, xp.asarray(num_bnd)
-                    )
-                    total_den_bnd = autocorr_utils.extend_and_add(
-                        total_den_bnd, xp.asarray(den_bnd)
-                    )
+                    total_num_bnd = autocorr_utils.extend_and_add(total_num_bnd, xp.asarray(num_bnd))
+                    total_den_bnd = autocorr_utils.extend_and_add(total_den_bnd, xp.asarray(den_bnd))
 
                 # cleanup
                 del padded, cloud_xp, num_all, den_all, cr_all, num_bnd, den_bnd, cr_bnd, out
                 if xp_backend == "cupy":
                     import cupy as cp
-
                     cp.cuda.Stream.null.synchronize()
 
     finally:
         writer.close()
 
-    # Aggregates
+    # --- aggregates (WK)
     C_r_all = xp.where(total_den_all > 0, total_num_all / total_den_all, xp.nan)
     with open(cr_outfile_all, "w") as f:
         for v in _to_numpy(C_r_all):
@@ -255,7 +289,7 @@ def main():
             pass
         print(f"[OK] No boundary centers aggregated.")
 
-    # Metadata
+    # --- metadata (record Δr + tags for reproducibility)
     meta = {
         "image": str(img_path),
         "run_tag": run_tag,
@@ -270,6 +304,11 @@ def main():
         "save_cr": args.save_cr,
         "save_cr_bnd": args.save_cr_bnd,
         "save_numden": args.save_numden,
+
+        # NEW: boundary-distance config
+        "bd_bin_width": args.bd_bin_width,
+        "center_method": "com",
+        "boundary_connectivity": "4c",
     }
     with open(meta_outfile, "w") as f:
         json.dump(meta, f, indent=2)
