@@ -1,6 +1,6 @@
 """
 Created Oct 18 2025
-Updated Oct 18 2025
+Updated Oct 19 2025
 
 (LOCAL)
 -- Uses the original CSV data containing NLC areas & perimeters.
@@ -12,7 +12,7 @@ sys.path.append('/Users/emullen98/Desktop/ghostcloud/ethan/nlc_fractal_scaling/l
 from _get_data import get_data
 import helper_scripts as hs
 
-thresh = '30G'  # Desired albedo threshold
+thresh = '40G'  # Desired albedo threshold
 min_area = 100  # Minimum area for fitting; can be an int or None for default behavior (min_area=15) in get_data()
 csv_loc = f'/Users/emullen98/Downloads/og_clouds/{thresh}_v4.csv'
 
@@ -20,6 +20,6 @@ areas, perims = get_data(csvloc=csv_loc, min_area=min_area)
 areas_xmin, areas_xmax, areas_exp = hs.find_pl_montecarlo(data=areas, stepsize=1)
 
 print('Area Power-Law Fit Results:')
-print(f'  xmin: {areas_xmin}')  # 46 pixels
-print(f'  xmax: {areas_xmax}')  # 5649 pixels
-print(f'  exponent: {areas_exp}')  # -1.803
+print(f'  xmin: {areas_xmin}')  
+print(f'  xmax: {areas_xmax}')  
+print(f'  exponent: {areas_exp}')  
