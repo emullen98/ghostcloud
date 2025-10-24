@@ -1,0 +1,96 @@
+# master_run.yaml
+
+metrics: ["fractal_dimension", "autocorr", "bdd"]
+sources: ["png", "siteperc"]
+
+# Human-facing labels (TAG uses only what's in output.tag_format)
+profile: "all_trial"
+tag_hint: "all_trials_new_analysis"
+
+paths:
+  # ---- Required roots ----
+  png_per_cloud_root: "scratch/all_clouds_data/threshold_autocorr_bd/per_cloud"
+  png_meta_root: "scratch/all_clouds_data/threshold_autocorr_bd"
+  siteperc_per_cloud_root: "scratch/all_clouds_data/sp_autocorr_bd/per_cloud"
+
+  # ---- Where outputs land ----
+  output_root: "scratch/all_clouds_data/analysis"
+
+filters:
+  # PNG axes (used only for source=png)
+  time_windows: ["03:00-04:00","04:00-05:00","05:00-06:00","06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","11:00-12:00","all"]
+  threshold_policies: ["all", "argmax_clouds"]
+
+  # Siteperc axis (used only for source=siteperc)
+  # "all" = discover from siteperc_per_cloud_root; otherwise give a list, e.g. [0.39, 0.4074, 0.42]
+  p_vals: "all"
+
+  # Common cloud filters
+  min_area: 500
+  max_area: 7500000
+  min_perim: null
+  max_perim: null
+  on_missing_metadata: "skip_run"   # "skip_run" | "keep_all_thresholds"
+  thresholds_whitelist: null        # only used if threshold_policy=="all" for PNG
+
+# -------------------------------------------------------------------------
+# Fractal Dimension options
+# -------------------------------------------------------------------------
+fd:
+  logs_base: "e"
+  perimeter_connectivity: 4
+  fit_range: null          # or {mode: quantiles, quantiles: [0.05, 0.95]}
+  fit_plot:
+    filename: "fd_{TAG}_fit.png"
+    annotate: true
+    dpi: 300
+    width: 1200
+    height: 900
+
+# -------------------------------------------------------------------------
+# Autocorrelation options
+# -------------------------------------------------------------------------
+autocorr:
+  which: "all"           # "all" or "bnd"
+  r_max_mode: "auto"     # "auto" or "fixed"
+  r_max_fixed: null      # used only if r_max_mode == "fixed"
+  eps_den: 1e-12
+
+# -------------------------------------------------------------------------
+# Boundary Distance Distribution options
+# -------------------------------------------------------------------------
+bdd:
+  U_SPACING: "log"           # "log" or "linear"
+  U_NBINS: 100
+  U_MARGIN_FRAC: 0.05
+  SPLAT: "linear"            # "linear" or "nearest"
+  MIN_CLOUDS_PER_BIN: 10
+  weighting: "by_counts"     # "equal" or "by_counts"
+  density_normalization: "pdf"
+
+# -------------------------------------------------------------------------
+# Output / tagging patterns
+#   TAG is computed as:
+#     {date}_{profile}_{source}_{thresh}_{win}_{hash8}
+#   where:
+#     - PNG:      thresh = threshold_policy, win = actual window
+#     - Siteperc: thresh = "p<value>",       win = "all"
+# -------------------------------------------------------------------------
+output:
+  tag_format: "{date}_{profile}_{source}_{thresh}_{win}_{hash8}"
+  save_resolved_config: true
+
+  # Fractal Dimension artifacts
+  fd_raw_csv: "fd_{TAG}_raw_areas_perims.csv"
+  fd_diagnostics_json: "fd_{TAG}_diagnostics.json"
+  fd_run_info_json: "fd_{TAG}_run_info.json"
+
+  # Autocorr artifacts
+  ac_csv: "ac_{TAG}.csv"
+  ac_diagnostics_json: "ac_{TAG}_diagnostics.json"
+  ac_run_info_json: "ac_{TAG}_run_info.json"
+
+  # BDD artifacts
+  bdd_csv: "bdd_{TAG}.csv"
+  bdd_diagnostics_json: "bdd_{TAG}_diagnostics.json"
+  bdd_run_info_json: "bdd_{TAG}_run_info.json"

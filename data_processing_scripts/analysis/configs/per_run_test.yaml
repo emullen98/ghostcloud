@@ -1,0 +1,82 @@
+metric: "bdd"    # can be "fractal_dimension", "autocorr", or "bdd"
+source: "png"                  # "png" | "siteperc"
+profile: "png_argmax_alltimes"
+tag_hint: "png_argmax_alltimes"
+
+paths:
+  # ---- Required 3 roots ----
+  png_per_cloud_root: "scratch/all_clouds_data/threshold_autocorr_bd/per_cloud"
+  png_meta_root: "scratch/all_clouds_data/threshold_autocorr_bd"
+  siteperc_per_cloud_root: "scratch/all_clouds_data/sp_autocorr_bd/per_cloud"
+
+  # ---- Where outputs land ----
+  output_root: "scratch/all_clouds_data/analysis/new/bdd/"
+
+filters:
+  # ---- Common cloud filters ----
+  time_windows: ["all"]             # or ["03:00-04:00"] etc.
+  threshold_policy: "all" # "all" | "argmax_clouds"
+  thresholds_whitelist: null        # only used if threshold_policy=="all"
+  p_vals: "all"                     # used only for siteperc
+  min_area: 100
+  max_area: 7500000
+  min_perim: null
+  max_perim: null
+  on_missing_metadata: "skip_run"   # "skip_run" | "keep_all_thresholds"
+
+# -------------------------------------------------------------------------
+# Fractal Dimension options
+# -------------------------------------------------------------------------
+fd:
+  logs_base: "e"
+  perimeter_connectivity: 4
+  fit_range: null          # or {mode: quantiles, quantiles: [0.05, 0.95]}
+  fit_plot:
+    filename: "fd_{TAG}_fit.png"
+    annotate: true
+    dpi: 150
+    width: 1200
+    height: 900
+
+# -------------------------------------------------------------------------
+# Autocorrelation options
+# -------------------------------------------------------------------------
+autocorr:
+  which: "all"           # "all" or "bnd"
+  r_max_mode: "auto"     # "auto" or "fixed"
+  r_max_fixed: null      # used only if r_max_mode == "fixed"
+  eps_den: 1e-12
+
+# -------------------------------------------------------------------------
+# Boundary Distance Distribution options
+# -------------------------------------------------------------------------
+bdd:
+  U_SPACING: "log"           # "log" or "linear"
+  U_NBINS: 100
+  U_MARGIN_FRAC: 0.05
+  SPLAT: "linear"            # "linear" or "nearest"
+  MIN_CLOUDS_PER_BIN: 10
+  weighting: "equal"         # "equal" or "by_counts"
+  density_normalization: "pdf"
+
+# -------------------------------------------------------------------------
+# Output / tagging patterns (shared by all metrics)
+# -------------------------------------------------------------------------
+output:
+  tag_format: "{date}_{profile}_{source}_{thresh}_{win}_{hash8}"
+  save_resolved_config: true
+
+  # Fractal Dimension artifacts
+  fd_raw_csv: "fd_{TAG}_raw_areas_perims.csv"
+  fd_diagnostics_json: "fd_{TAG}_diagnostics.json"
+  fd_run_info_json: "fd_{TAG}_run_info.json"
+
+  # Autocorr artifacts
+  ac_csv: "ac_{TAG}.csv"
+  ac_diagnostics_json: "ac_{TAG}_diagnostics.json"
+  ac_run_info_json: "ac_{TAG}_run_info.json"
+
+  # BDD artifacts
+  bdd_csv: "bdd_{TAG}.csv"
+  bdd_diagnostics_json: "bdd_{TAG}_diagnostics.json"
+  bdd_run_info_json: "bdd_{TAG}_run_info.json"
