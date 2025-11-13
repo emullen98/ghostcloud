@@ -32,6 +32,12 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 : "${MAX_BYTES_PER_FLUSH:=$((128*1024*1024))}"
 : "${BD_BIN_WIDTH:=1.0}"
 
+# NEW: preprocessing flags (default to Python script defaults)
+: "${ORDER:=FL}"   # LF_bbox|FL
+: "${CL:=4}"       # 4|8
+: "${CF:=4}"       # 4|8
+: "${BBOX_PAD:=1}" # integer
+
 # Optional per-cloud save flags
 : "${SAVE_CR:=0}"
 : "${SAVE_CR_BND:=0}"
@@ -41,7 +47,7 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 module load cuda/12.8
 source clouds/venv/bin/activate
 
-mkdir -p "${OUTDIR}" scratch/logs
+mkdir -p "${OUTDIR}" scratch/logs/thr_autocorr_bd_${SLURM_JOB_ID:-NA}
 
 STEM="$(basename "${IMG%.*}")"
 echo "[INFO] Starting threshold+autocorr+BD job for ${STEM}"
@@ -49,6 +55,7 @@ echo "[INFO] IMG=${IMG}"
 echo "[INFO] OUTDIR=${OUTDIR}"
 echo "[INFO] THRESHOLDS_FILE=${THRESHOLDS_FILE}"
 echo "[INFO] MIN_AREA=${MIN_AREA}, MAX_AREA=${MAX_AREA}"
+echo "[INFO] ORDER=${ORDER} CL=${CL} CF=${CF} BBOX_PAD=${BBOX_PAD}"
 echo "[INFO] BD_BIN_WIDTH=${BD_BIN_WIDTH}"
 echo "[INFO] SAVE_CR=${SAVE_CR}, SAVE_CR_BND=${SAVE_CR_BND}, SAVE_NUMDEN=${SAVE_NUMDEN}"
 
@@ -63,6 +70,10 @@ ARGS=(
   --rows-per-flush "${ROWS_PER_FLUSH}"
   --max-bytes-per-flush "${MAX_BYTES_PER_FLUSH}"
   --bd-bin-width "${BD_BIN_WIDTH}"
+  --order "${ORDER}"
+  --cl "${CL}"
+  --cf "${CF}"
+  --bbox-pad "${BBOX_PAD}"
 )
 
 [[ "${SAVE_CR}" -eq 1 ]] && ARGS+=( --save-cr )

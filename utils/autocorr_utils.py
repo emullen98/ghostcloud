@@ -534,7 +534,9 @@ def compute_radial_autocorr(image, mask_stack):
 class CloudRow:
     # Geometry
     cloud_idx: int
-    perim: int
+    perim_raw: int
+    perim_hull: int
+    perim_accessible: int
     area: int
 
     # Tags
@@ -568,8 +570,13 @@ class ParquetWriter:
     Append-style writer for per-cloud outputs, now including optional radial profile columns.
 
     Columns:
-      - cloud_idx (int64)
-      - perim     (int64)
+      - cloud_idx           (int64)
+      - perim_raw           (int64)
+            Raw perimeter (no hole-fill; includes holes and fjords).
+      - perim_hull          (int64)
+            Hull perimeter (holes filled; fjords intact).
+      - perim_accessible    (int64)
+            External or accessible perimeter (holes + narrow fjords filled).
       - area      (int64)
       - threshold (float64, nullable)
       - p_val     (float64, nullable)
@@ -651,7 +658,9 @@ class ParquetWriter:
     def _rows_to_table(rows: List['CloudRow']) -> pa.Table:
         # scalars
         cloud_idx = pa.array([r.cloud_idx for r in rows], type=pa.int64())
-        perim     = pa.array([r.perim     for r in rows], type=pa.int64())
+        perim_raw = pa.array([r.perim_raw for r in rows], type=pa.int64())
+        perim_hull = pa.array([r.perim_hull for r in rows], type=pa.int64())
+        perim_accessible = pa.array([r.perim_accessible for r in rows], type=pa.int64())
         area      = pa.array([r.area      for r in rows], type=pa.int64())
         threshold = pa.array([None if r.threshold is None else float(r.threshold) for r in rows], type=pa.float64())
         p_val     = pa.array([None if r.p_val    is None else float(r.p_val)     for r in rows], type=pa.float64())
@@ -686,11 +695,13 @@ class ParquetWriter:
         bd_n = pa.array([None if r.bd_n is None else int(r.bd_n) for r in rows], type=pa.int64())
 
         return pa.table({
-            "cloud_idx": cloud_idx,
-            "perim":     perim,
-            "area":      area,
-            "threshold": threshold,
-            "p_val":     p_val,
+            "cloud_idx":            cloud_idx,
+            "perim_raw":            perim_raw,
+            "perim_hull":           perim_hull,
+            "perim_accessible":     perim_accessible,
+            "area":                 area,
+            "threshold":            threshold,
+            "p_val":                p_val,
 
             "cr":        cr,
             "cr_bnd":    cr_bnd,

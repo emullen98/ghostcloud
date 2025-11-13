@@ -7,12 +7,17 @@ QA for per-cloud Parquet shards + metadata produced by:
 
 Checks:
   - required columns present (incl. p_val)
+  - three perimeter metrics present: perim_raw, perim_hull, perim_accessible
   - bd_r spacing matches Δr = bd_bin_width (within tol)
   - zero-origin alignment: first bd_r ≈ 0.5*Δr (warn-only)
   - sum(bd_counts) == bd_n
-  - com length-2 finite; rg_area finite and >= 0
-  - optional WK: cr present if saved; num_all/den_all lengths match if saved
-  - metadata bd_bin_width & p agree with rows (warn for Δr, err for p mismatch)
+  - COM length-2 finite; rg_area finite and >= 0; optional rg_bnd finite and >= 0 if present
+  - optional WK:
+        * cr/all present if saved; num_all/den_all lengths match if saved
+        * if num_bnd/den_bnd present, lengths match; cr_bnd present iff both num_bnd & den_bnd
+  - metadata bd_bin_width & p agree with rows
+        * warn if Δr from rows differs from meta bd_bin_width
+        * error if any row p_val != meta p
   - reports unique center_method and boundary_connectivity
 
 Exits non-zero on hard errors if --strict is set.
@@ -36,8 +41,12 @@ def _is_uniform_spacing(arr: np.ndarray, step: float, rtol=1e-6, atol=1e-9) -> b
         return True
     return np.allclose(np.diff(arr), step, rtol=rtol, atol=atol)
 
+
 def _read_meta(run_dir: Path) -> Optional[dict]:
-    # run_dir is .../per_cloud/<run_tag>/
+    """
+    run_dir is .../per_cloud/<run_tag>/
+    meta lives at   .../<run_tag>_meta.json
+    """
     run_tag = run_dir.name
     meta_path = run_dir.parent.parent / f"{run_tag}_meta.json"
     if meta_path.exists():
@@ -47,6 +56,7 @@ def _read_meta(run_dir: Path) -> Optional[dict]:
             return None
     return None
 
+
 def _val(col, i):
     """Arrow-safe getter: returns Python value or None for any scalar/list column."""
     if col is None:
@@ -55,6 +65,7 @@ def _val(col, i):
         return col[i].as_py()
     except Exception:
         return None
+
 
 def _len_or_zero(x) -> int:
     try:
@@ -81,31 +92,43 @@ def validate(per_cloud_dir: Path, strict: bool, show_sample: int) -> int:
 
     meta = _read_meta(per_cloud_dir)
     meta_bw = float(meta["bd_bin_width"]) if (meta and "bd_bin_width" in meta) else None
-    meta_p  = float(meta["p"])            if (meta and "p"            in meta) else None
+    meta_p = float(meta["p"]) if (meta and "p" in meta) else None
+    meta_center = meta.get("center_method") if meta else None
+
     if meta_bw is not None:
         print(f"[INFO] meta bd_bin_width = {meta_bw}")
     if meta_p is not None:
         print(f"[INFO] meta p            = {meta_p}")
+    if meta_center is not None:
+        print(f"[INFO] meta center_method = {meta_center}")
 
     required = {
-        "cloud_idx", "perim", "area",
+        "cloud_idx",
+        "perim_raw", "perim_hull", "perim_accessible",
+        "area",
         "p_val",
         "bd_r", "bd_counts", "bd_bin_width", "bd_n",
         "center_method", "boundary_connectivity",
         "com", "rg_area",
-        # optional: rg_bnd, cr, num_all, den_all
+        # optional: rg_bnd, cr, cr_bnd, num_all, den_all, num_bnd, den_bnd
     }
 
     n_rows = 0
-    areas, perims = [], []
+    areas: List[int] = []
+    perims_raw: List[int] = []
+    perims_hull: List[int] = []
+    perims_acc: List[int] = []
+
     uniq_bw = set()
     uniq_cm = set()
     uniq_bc = set()
     saw_cr = False
+    saw_cr_bnd = False
     saw_numden = False
+    saw_numden_bnd = False
 
     samples: List[Tuple[int, dict]] = []
-    gid = 0
+    gid = 0  # global row counter across all shards
 
     for part in parts:
         pf = pq.ParquetFile(part)
@@ -122,32 +145,48 @@ def validate(per_cloud_dir: Path, strict: bool, show_sample: int) -> int:
             n = tbl.num_rows
             n_rows += n
 
-            def col(name): return tbl[name] if name in tbl.column_names else None
+            def col(name):
+                return tbl[name] if name in tbl.column_names else None
 
+            # scalar geometry / tags
             area_c = col("area")
-            perim_c = col("perim")
+            pr_c = col("perim_raw")
+            ph_c = col("perim_hull")
+            pa_c = col("perim_accessible")
             p_c = col("p_val")
 
             bd_r_c = col("bd_r")
             bd_counts_c = col("bd_counts")
             bw_c = col("bd_bin_width")
             bdn_c = col("bd_n")
+
             cm_c = col("center_method")
             bc_c = col("boundary_connectivity")
             com_c = col("com")
             rgA_c = col("rg_area")
             rgB_c = col("rg_bnd") if "rg_bnd" in tbl.column_names else None
 
-            # optional WK
+            # optional WK (all centers)
             cr_c = col("cr")
             na_c = col("num_all")
             da_c = col("den_all")
 
+            # optional WK (boundary centers)
+            crb_c = col("cr_bnd") if "cr_bnd" in tbl.column_names else None
+            nab_c = col("num_bnd") if "num_bnd" in tbl.column_names else None
+            dab_c = col("den_bnd") if "den_bnd" in tbl.column_names else None
+
             for i in range(n):
                 # --- geometry
                 area = int(_val(area_c, i))
-                perim = int(_val(perim_c, i))
-                areas.append(area); perims.append(perim)
+                pr = int(_val(pr_c, i))
+                ph = int(_val(ph_c, i))
+                pa = int(_val(pa_c, i))
+
+                areas.append(area)
+                perims_raw.append(pr)
+                perims_hull.append(ph)
+                perims_acc.append(pa)
 
                 # --- p consistency
                 p_val = _val(p_c, i)
@@ -165,6 +204,8 @@ def validate(per_cloud_dir: Path, strict: bool, show_sample: int) -> int:
                 if bd_r is None or bd_counts is None:
                     print(f"[ERR] row {gid}: bd_r/bd_counts missing")
                     errs += 1
+                    r = None
+                    c = None
                 else:
                     r = np.asarray(bd_r, float)
                     c = np.asarray(bd_counts, float)
@@ -176,26 +217,31 @@ def validate(per_cloud_dir: Path, strict: bool, show_sample: int) -> int:
                 bw = float(_val(bw_c, i))
                 uniq_bw.add(round(bw, 9))
                 if bd_r is not None and _len_or_zero(bd_r) > 1:
-                    r = np.asarray(bd_r, float)
-                    if not _is_uniform_spacing(r, bw):
+                    r_arr = np.asarray(bd_r, float)
+                    if not _is_uniform_spacing(r_arr, bw):
                         print(f"[ERR] row {gid}: bd_r spacing != bd_bin_width ({bw})")
                         errs += 1
-                    if not np.isclose(r[0], 0.5 * bw, rtol=1e-6, atol=1e-6):
-                        print(f"[WARN] row {gid}: first bd_r={r[0]:.6g} not ≈ 0.5*Δr={0.5*bw:.6g}")
+                    if not np.isclose(r_arr[0], 0.5 * bw, rtol=1e-6, atol=1e-6):
+                        print(
+                            f"[WARN] row {gid}: first bd_r={r_arr[0]:.6g} "
+                            f"not ≈ 0.5*Δr={0.5 * bw:.6g}"
+                        )
                         warns += 1
 
                 # --- count sum
                 bdn = int(_val(bdn_c, i))
                 if bd_counts is not None:
-                    c = np.asarray(bd_counts, float)
-                    s = int(np.rint(np.sum(c)))
+                    c_arr = np.asarray(bd_counts, float)
+                    s = int(np.rint(np.sum(c_arr)))
                     if s != bdn:
                         print(f"[ERR] row {gid}: sum(bd_counts)={s} != bd_n={bdn}")
                         errs += 1
 
                 # --- COM + Rg
                 com = _val(com_c, i)
-                if (com is None) or (len(com) != 2) or (not np.all(np.isfinite(com))):
+                if (com is None) or (len(com) != 2) or (
+                    not np.all(np.isfinite(np.asarray(com, float)))
+                ):
                     print(f"[ERR] row {gid}: invalid com={com}")
                     errs += 1
 
@@ -214,10 +260,18 @@ def validate(per_cloud_dir: Path, strict: bool, show_sample: int) -> int:
                 # --- tags
                 cm = _val(cm_c, i)
                 bc = _val(bc_c, i)
-                if cm: uniq_cm.add(cm)
-                if bc: uniq_bc.add(bc)
+                if cm:
+                    uniq_cm.add(cm)
+                    if meta_center is not None and cm != meta_center:
+                        print(
+                            f"[WARN] row {gid}: center_method='{cm}' "
+                            f"!= meta center_method='{meta_center}'"
+                        )
+                        warns += 1
+                if bc:
+                    uniq_bc.add(bc)
 
-                # --- optional WK checks
+                # --- optional WK checks: all-centers
                 cr_val = _val(cr_c, i) if cr_c is not None else None
                 if cr_val is not None:
                     saw_cr = True
@@ -234,40 +288,116 @@ def validate(per_cloud_dir: Path, strict: bool, show_sample: int) -> int:
                             print(f"[ERR] row {gid}: len(num_all)!=len(den_all)")
                             errs += 1
 
+                # --- optional WK checks: boundary-centers
+                crb_val = _val(crb_c, i) if crb_c is not None else None
+                nab = _val(nab_c, i) if nab_c is not None else None
+                dab = _val(dab_c, i) if dab_c is not None else None
+
+                if crb_val is not None:
+                    saw_cr_bnd = True
+
+                if nab is not None or dab is not None:
+                    saw_numden_bnd = True
+                    if (nab is None) ^ (dab is None):
+                        print(f"[ERR] row {gid}: num_bnd/den_bnd one is None")
+                        errs += 1
+                    else:
+                        if len(nab) != len(dab):
+                            print(f"[ERR] row {gid}: len(num_bnd)!=len(den_bnd)")
+                            errs += 1
+                        # if we have boundary num/den, we *expect* a cr_bnd too
+                        if crb_val is None:
+                            print(
+                                f"[WARN] row {gid}: num_bnd/den_bnd present but cr_bnd is None"
+                            )
+                            warns += 1
+
                 # --- sample capture
                 if len(samples) < show_sample:
-                    r0 = (np.asarray(bd_r, float)[0] if bd_r else None)
-                    bd_sum = (int(np.rint(np.sum(np.asarray(bd_counts, float)))) if bd_counts else None)
-                    samples.append((
-                        gid,
-                        dict(p=p_val, area=area, perim=perim, bd_bins=_len_or_zero(bd_r),
-                             bd_sum=bd_sum, bd_n=bdn, Δr=bw, r0=r0,
-                             com=com, rg_area=rgA, cm=cm, bconn=bc)
-                    ))
+                    r0 = (
+                        float(np.asarray(bd_r, float)[0])
+                        if bd_r is not None and _len_or_zero(bd_r) > 0
+                        else None
+                    )
+                    bd_sum = (
+                        int(
+                            np.rint(
+                                np.sum(np.asarray(bd_counts, float))
+                            )
+                        )
+                        if bd_counts is not None
+                        else None
+                    )
+                    samples.append(
+                        (
+                            gid,
+                            dict(
+                                p=p_val,
+                                area=area,
+                                perim_raw=pr,
+                                perim_hull=ph,
+                                perim_accessible=pa,
+                                bd_bins=_len_or_zero(bd_r),
+                                bd_sum=bd_sum,
+                                bd_n=bdn,
+                                Δr=bw,
+                                r0=r0,
+                                com=com,
+                                rg_area=rgA,
+                                cm=cm,
+                                bconn=bc,
+                            ),
+                        )
+                    )
 
                 gid += 1
 
+    # ---------------------------
     # Summary
+    # ---------------------------
     print("\n=== Summary ===")
     print(f"[OK] rows checked       : {n_rows}")
     if areas:
-        print(f"[OK] area stats         : min={min(areas)} max={max(areas)} median={int(np.median(areas))}")
-    if perims:
-        print(f"[OK] perim stats        : min={min(perims)} max={max(perims)} median={int(np.median(perims))}")
+        print(
+            f"[OK] area stats         : "
+            f"min={min(areas)} max={max(areas)} median={int(np.median(areas))}"
+        )
+    if perims_raw:
+        print(
+            f"[OK] perim_raw stats    : "
+            f"min={min(perims_raw)} max={max(perims_raw)} "
+            f"median={int(np.median(perims_raw))}"
+        )
+    if perims_hull:
+        print(
+            f"[OK] perim_hull stats   : "
+            f"min={min(perims_hull)} max={max(perims_hull)} "
+            f"median={int(np.median(perims_hull))}"
+        )
+    if perims_acc:
+        print(
+            f"[OK] perim_access stats : "
+            f"min={min(perims_acc)} max={max(perims_acc)} "
+            f"median={int(np.median(perims_acc))}"
+        )
+
     if uniq_bw:
         srt = sorted(uniq_bw)
         print(f"[OK] bd_bin_width uniq  : {srt}")
-        if (meta_bw is not None) and (len(srt) == 1):
+        if meta_bw is not None and len(srt) == 1:
             u = srt[0]
             if not np.isclose(u, meta_bw, rtol=1e-6, atol=1e-9):
                 print(f"[WARN] row Δr={u} differs from meta Δr={meta_bw}")
                 warns += 1
+
     if uniq_cm:
         print(f"[OK] center_method uniq : {sorted(uniq_cm)}")
     if uniq_bc:
         print(f"[OK] boundary_conn uniq : {sorted(uniq_bc)}")
     print(f"[OK] has cr(all)?       : {saw_cr}")
+    print(f"[OK] has cr(boundary)?  : {saw_cr_bnd}")
     print(f"[OK] has num/den(all)?  : {saw_numden}")
+    print(f"[OK] has num/den(bnd)?  : {saw_numden_bnd}")
 
     if samples:
         print("\n--- Sample rows ---")
@@ -289,17 +419,33 @@ def validate(per_cloud_dir: Path, strict: bool, show_sample: int) -> int:
 # ---------------------------
 def main():
     ap = argparse.ArgumentParser(
-        description="Validate per-cloud Parquet outputs (SP) from sp_autocorr_bd_from_model.py"
+        description=(
+            "Validate per-cloud Parquet outputs (SP) from sp_autocorr_bd_from_model.py"
+        )
     )
-    ap.add_argument("--per-cloud-dir", required=True,
-                    help="Path to scratch/sp_autocorr_bd/per_cloud/<run_tag>/")
-    ap.add_argument("--strict", action="store_true",
-                    help="Exit non-zero on any [ERR].")
-    ap.add_argument("--show-sample", type=int, default=3,
-                    help="How many sample rows to print.")
+    ap.add_argument(
+        "--per-cloud-dir",
+        required=True,
+        help="Path to scratch/sp_autocorr_bd/per_cloud/<run_tag>/",
+    )
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero on any [ERR].",
+    )
+    ap.add_argument(
+        "--show-sample",
+        type=int,
+        default=3,
+        help="How many sample rows to print.",
+    )
     args = ap.parse_args()
 
-    rc = validate(Path(args.per_cloud_dir), strict=args.strict, show_sample=args.show_sample)
+    rc = validate(
+        Path(args.per_cloud_dir),
+        strict=args.strict,
+        show_sample=args.show_sample,
+    )
     sys.exit(rc)
 
 

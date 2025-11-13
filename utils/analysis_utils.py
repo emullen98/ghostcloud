@@ -133,19 +133,19 @@ def apply_common_filters(
     """
     Apply shared area/perimeter gates. Non-positive area/perim rows are dropped first.
     If a bound is None, it is not applied.
-    Expects columns 'area' and 'perim'; returns empty DF if not found.
+    Expects columns 'area' and 'perim_raw'; returns empty DF if not found.
     """
-    if "area" not in df.columns or "perim" not in df.columns:
+    if "area" not in df.columns or "perim_raw" not in df.columns:
         return df.iloc[0:0]
-    df = df[(df["area"] > 0) & (df["perim"] > 0)]
+    df = df[(df["area"] > 0) & (df["perim_raw"] > 0)]
     if min_area is not None:
         df = df[df["area"] >= float(min_area)]
     if max_area is not None:
         df = df[df["area"] <= float(max_area)]
     if min_perim is not None:
-        df = df[df["perim"] >= float(min_perim)]
+        df = df[df["perim_raw"] >= float(min_perim)]
     if max_perim is not None:
-        df = df[df["perim"] <= float(max_perim)]
+        df = df[df["perim_raw"] <= float(max_perim)]
     return df
 
 def read_parquet_cols(path: str, cols: list) -> pd.DataFrame:

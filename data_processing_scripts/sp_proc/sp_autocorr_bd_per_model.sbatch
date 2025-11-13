@@ -10,8 +10,10 @@
 #SBATCH --error=scratch/logs/sp_autocorr_bd_%A/sp_autocorr_bd_%A_%a.err
 
 # ============================================================
-# Example submit:
+# Example:
 # sbatch --export=ALL,WIDTH=10000,HEIGHT=10000,P=0.4074,SEED=123,OUTDIR=scratch/sp_autocorr_bd,PREFIX=sp_autocorr_bd clouds/data_processing_scripts/sp_proc/sp_autocorr_bd_per_model.sbatch
+# Forwarded env (with defaults):
+#   ORDER=FL, CL=4, CF=4, BBOX_PAD=1
 # ============================================================
 
 set -euo pipefail
@@ -32,6 +34,12 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 : "${MAX_BYTES_PER_FLUSH:=$((128*1024*1024))}"
 : "${BD_BIN_WIDTH:=1.0}"
 
+# NEW: preprocessing flags (default to Python script defaults)
+: "${ORDER:=FL}"   # LF_bbox|FL
+: "${CL:=4}"       # 4|8
+: "${CF:=4}"       # 4|8
+: "${BBOX_PAD:=1}" # integer
+
 # Optional per-cloud save flags (WK)
 : "${SAVE_CR:=1}"
 : "${SAVE_CR_BND:=0}"
@@ -40,10 +48,11 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 module load cuda/12.8
 source clouds/venv/bin/activate
 
-mkdir -p "${OUTDIR}" scratch/logs
+mkdir -p "${OUTDIR}" "scratch/logs/sp_autocorr_bd_${SLURM_JOB_ID:-NA}"
 
-echo "[INFO] Starting SP job WIDTH=${WIDTH} HEIGHT=${HEIGHT} P=${P} SEED=${SEED}"
+echo "[INFO] Start WIDTH=${WIDTH} HEIGHT=${HEIGHT} P=${P} SEED=${SEED}"
 echo "[INFO] MIN_AREA=${MIN_AREA} MAX_AREA=${MAX_AREA}"
+echo "[INFO] ORDER=${ORDER} CL=${CL} CF=${CF} BBOX_PAD=${BBOX_PAD}"
 echo "[INFO] BD_BIN_WIDTH=${BD_BIN_WIDTH}"
 echo "[INFO] SAVE_CR=${SAVE_CR} SAVE_CR_BND=${SAVE_CR_BND} SAVE_NUMDEN=${SAVE_NUMDEN}"
 
@@ -59,6 +68,10 @@ ARGS=(
   --rows-per-flush "${ROWS_PER_FLUSH}"
   --max-bytes-per-flush "${MAX_BYTES_PER_FLUSH}"
   --bd-bin-width "${BD_BIN_WIDTH}"
+  --order "${ORDER}"
+  --cl "${CL}"
+  --cf "${CF}"
+  --bbox-pad "${BBOX_PAD}"
 )
 
 [[ "${SAVE_CR}" -eq 1 ]] && ARGS+=( --save-cr )

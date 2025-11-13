@@ -1,32 +1,40 @@
-# master_run.yaml
+# master_run_siteperc_p0p407254_cl4_cf8_ordLF_bbox.yaml
 
 metrics: ["fractal_dimension", "autocorr", "bdd"]
-sources: ["png", "siteperc"]
+
+# CHANGED: new pipeline = one source per master
+sources: ["png"]   # was ["png", "siteperc"]
 
 # Human-facing labels (TAG uses only what's in output.tag_format)
-profile: "all_trial"
+profile: "png_cl8_cf4_ordLF_bbox"
 tag_hint: "all_trials_new_analysis"
 
 paths:
   # ---- Required roots ----
-  png_per_cloud_root: "scratch/all_clouds_data/threshold_autocorr_bd/per_cloud"
-  png_meta_root: "scratch/all_clouds_data/threshold_autocorr_bd"
-  siteperc_per_cloud_root: "scratch/all_clouds_data/sp_autocorr_bd/per_cloud"
+  # These can stay as-is; they won't be used for a siteperc-only run
+  png_per_cloud_root: "scratch/new_data/threshold_autocorr_bd/cl8_cf4_ordLF_bbox/per_cloud"
+  png_meta_root: "scratch/new_data/threshold_autocorr_bd/cl8_cf4_ordLF_bbox"
 
-  # ---- Where outputs land ----
-  output_root: "scratch/all_clouds_data/analysis"
+  # CHANGED: point to the new per-cloud root for THIS dataset
+  siteperc_per_cloud_root: "scratch/new_data/sp_autocorr_bd/p0p592746_cl4_cf8_ordFL/per_cloud"
+
+  # CHANGED (recommended): use the new analysis root for new_data
+  output_root: "scratch/new_data/analysis"
+
+  # NEW: explicitly set dataset_id so we don't infer "per_cloud"
+  dataset_id: "cl8_cf4_ordLF_bbox"
 
 filters:
-  # PNG axes (used only for source=png)
-  time_windows: ["03:00-04:00","04:00-05:00","05:00-06:00","06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","11:00-12:00","all"]
+  # PNG axes (ignored for source=siteperc, but schema still wants them)
+  time_windows: ["03:00-04:00","04:00-05:00","05:00-06:00","06:00-07:00",
+                 "07:00-08:00","08:00-09:00","09:00-10:00","11:00-12:00","all"]
   threshold_policies: ["all", "argmax_clouds"]
 
-  # Siteperc axis (used only for source=siteperc)
-  # "all" = discover from siteperc_per_cloud_root; otherwise give a list, e.g. [0.39, 0.4074, 0.42]
-  p_vals: "all"
+  # Siteperc axis: "all" = discover from siteperc_per_cloud_root
+  p_vals: "all"   # or e.g. [0.39, 0.4074] if you want to pin
 
   # Common cloud filters
-  min_area: 500
+  min_area: 100
   max_area: 7500000
   min_perim: null
   max_perim: null
@@ -70,11 +78,6 @@ bdd:
 
 # -------------------------------------------------------------------------
 # Output / tagging patterns
-#   TAG is computed as:
-#     {date}_{profile}_{source}_{thresh}_{win}_{hash8}
-#   where:
-#     - PNG:      thresh = threshold_policy, win = actual window
-#     - Siteperc: thresh = "p<value>",       win = "all"
 # -------------------------------------------------------------------------
 output:
   tag_format: "{date}_{profile}_{source}_{thresh}_{win}_{hash8}"

@@ -47,11 +47,30 @@ def _iter_png_rows(cfg: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         run_dir = Path(paths["png_per_cloud_root"]) / run_tag
         for pq in sorted(run_dir.glob("cloud_metrics.part*.parquet")):
             # be permissive on columns; we will pick what we need
-            need = ["area", "perim", "bd_r", "bd_counts", "rg_area",
-                    "rp_r", "rp_counts", "Rg_area", "bd_bin_width", "bd_n"]
+            need = [
+                "are`a",
+                "perim_raw", "perim_hull", "perim_accessible",  # new schema
+                "perim",                                        # legacy
+                "bd_r", "bd_counts", "rg_area",
+                "rp_r", "rp_counts", "Rg_area", "bd_bin_width", "bd_n",
+            ]
             df = read_parquet_cols(str(pq), need)
             if df.empty:
                 continue
+
+            # --- NEW BLOCK: canonicalize perimeter for filtering ---
+            # If only legacy `perim` exists, treat it as perim_raw
+            if "perim_raw" not in df.columns and "perim" in df.columns:
+                df["perim_raw"] = df["perim"]
+
+            # Ensure perim_raw exists (may be all-NaN if truly missing)
+            if "perim_raw" not in df.columns:
+                df["perim_raw"] = np.nan
+
+            # apply_common_filters expects a column named "perim"
+            df["perim"] = df["perim_raw"]
+            # --- END NEW BLOCK ---
+
             df = apply_common_filters(
                 df,
                 flt.get("min_area"), flt.get("max_area"),
@@ -66,9 +85,32 @@ def _iter_siteperc_rows(cfg: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
     """Yield filtered rows with bd_r, bd_counts, rg_area from site-perc per-cloud runs."""
     paths = cfg["paths"]; flt = cfg["filters"]
     for pq in discover_sp_parquets(paths["siteperc_per_cloud_root"]):
-        need = ["area", "perim", "bd_r", "bd_counts", "rg_area",
-                "rp_r", "rp_counts", "Rg_area", "bd_bin_width", "bd_n", "p_val"]
+        need = [
+            "area",
+            "perim_raw", "perim_hull", "perim_accessible",  # new schema
+            "perim",                                        # legacy
+            "bd_r", "bd_counts", "rg_area",
+            "rp_r", "rp_counts", "Rg_area", "bd_bin_width", "bd_n",
+            "p_val",
+        ]
         df = read_parquet_cols(pq, need)
+        if df.empty:
+            continue
+
+        # --- NEW BLOCK: canonicalize perimeter for filtering ---
+        if "perim_raw" not in df.columns and "perim" in df.columns:
+            df["perim_raw"] = df["perim"]
+        if "perim_raw" not in df.columns:
+            df["perim_raw"] = np.nan
+        df["perim"] = df["perim_raw"]
+        # --- END NEW BLOCK ---
+
+        df = apply_common_filters(
+            df,
+            flt.get("min_area"), flt.get("max_area"),
+            flt.get("min_perim"), flt.get("max_perim"),
+        )
+
         if df.empty:
             continue
         df = apply_common_filters(
