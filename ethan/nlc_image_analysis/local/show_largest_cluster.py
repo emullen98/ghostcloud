@@ -3,8 +3,8 @@ Created Sep 20 2024
 Updated Sep 20 2024
 
 """
-from helper_scripts.image_to_binary_array import *
-from helper_scripts.get_pa import *
+from helper_scripts_bs.image_to_binary_array import *
+from helper_scripts_bs.get_pa import *
 import matplotlib.pyplot as plt
 
 threshold = 120
