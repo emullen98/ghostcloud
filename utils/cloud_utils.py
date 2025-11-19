@@ -5,6 +5,7 @@ import warnings
 from typing import Union
 from scipy.special import gamma, kv
 from scipy.fftpack import fftn, ifftn
+from typing import List, Tuple, Optional
 
 def generate_site_percolation_lattice(width: int, height: int, fill_prob: float, seed: int = None) -> np.ndarray:
     """
@@ -852,3 +853,238 @@ def generate_correlated_percolation_lattice_optimized(
     gc.collect()
 
     return lattice
+
+# ---------------------------------------------------------------------
+# Connectivity structures for 4/8-neighborhood operations
+# ---------------------------------------------------------------------
+# For scipy.ndimage morphology, connectivity is defined by the 'structure' array.
+# 4-connected uses the cross-shaped structure; 8-connected uses full 3x3.
+_STRUCT_4 = np.array([[0, 1, 0],
+                      [1, 1, 1],
+                      [0, 1, 0]], dtype=np.uint8)
+_STRUCT_8 = np.ones((3, 3), dtype=np.uint8)
+
+def _structure_from_conn(conn: int) -> np.ndarray:
+    """
+    Map connectivity integer (4 or 8) to a scipy-compatible structure array.
+    """
+    if conn == 4:
+        return _STRUCT_4
+    if conn == 8:
+        return _STRUCT_8
+    raise ValueError(f"Connectivity must be 4 or 8, got {conn}.")
+
+# ---------------------------------------------------------------------
+# Label wrapper with explicit connectivity and returned slices
+# ---------------------------------------------------------------------
+def _label_components(binary: np.ndarray, cl: int) -> Tuple[np.ndarray, int, List[Optional[slice]]]:
+    """
+    Label connected components on a binary (bool) lattice using explicit connectivity.
+
+    Parameters
+    ----------
+    binary : np.ndarray
+        Boolean array where True indicates foreground (occupied).
+    cl : int
+        Label (foreground) connectivity: 4 or 8.
+
+    Returns
+    -------
+    labels : np.ndarray
+        Integer-labeled array, 0 = background.
+    n : int
+        Number of labels.
+    slices : list
+        Result of scipy.ndimage.find_objects(labels): per-label bounding slices.
+    """
+    if binary.dtype != np.bool_:
+        raise ValueError("Expected 'binary' to be a boolean array.")
+    structure = _structure_from_conn(cl)
+    labels, n = label(binary, structure=structure)
+    slices = find_objects(labels)
+    return labels, n, slices
+
+# ---------------------------------------------------------------------
+# Utilities to clamp & optionally pad a label's bounding box
+# ---------------------------------------------------------------------
+def _clamp(v: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, v))
+
+def _pad_slice(obj_slice: Tuple[slice, slice], shape: Tuple[int, int], pad: int) -> Tuple[slice, slice]:
+    """
+    Pad a 2D slice by 'pad' pixels on each side, clamped to image bounds.
+    """
+    if pad <= 0:
+        return obj_slice
+    (r, c) = obj_slice
+    H, W = shape
+    r0 = _clamp((r.start or 0) - pad, 0, H)
+    r1 = _clamp((r.stop  or 0) + pad, 0, H)
+    c0 = _clamp((c.start or 0) - pad, 0, W)
+    c1 = _clamp((c.stop  or 0) + pad, 0, W)
+    return (slice(r0, r1), slice(c0, c1))
+
+# ---------------------------------------------------------------------
+# Unified entrypoint — single call from raw lattice to post-fill crops
+# ---------------------------------------------------------------------
+def preprocess_and_crop_clouds(
+    lattice: np.ndarray,
+    *,
+    order: str,               # "LF_bbox" or "FL"
+    cl: int,                  # label connectivity (foreground): 4 or 8
+    cf: int,                  # flood connectivity (background): 4 or 8
+    min_area: Optional[int],
+    max_area: Optional[int],
+    bbox_pad: int = 1,        # recommended = 1 to avoid frame artifacts at bbox edges
+    contact_type: str = "internal" # NEW: apply same contact filter semantics as before
+) -> List[np.ndarray]:
+    """
+    Unified preprocessing pipeline that returns cropped, post-fill cloud lattices.
+
+    Adds edge-contact filtering ('contact_type') identical in spirit to
+    `extract_cropped_clouds_by_size`, but performed inside this unified step.
+
+    contact_type options:
+        "internal", "single_edge", "two_edge", "mirrorable", "valid",
+        "non_mirrorable", "all"
+    """
+    if lattice.dtype != np.bool_:
+        raise ValueError("Expected 'lattice' to be a boolean array.")
+    if order not in {"LF_bbox", "FL"}:
+        raise ValueError(f"order must be 'LF_bbox' or 'FL', got '{order}'.")
+    if contact_type not in {
+        "internal", "single_edge", "two_edge",
+        "mirrorable", "valid", "non_mirrorable", "all"
+    }:
+        raise ValueError(f"Invalid contact_type '{contact_type}'.")
+
+    H, W = lattice.shape
+    crops: List[np.ndarray] = []
+
+    if order == "LF_bbox":
+        # 1) Label on RAW lattice (pre-fill)
+        labels0, n0, slices0 = _label_components(lattice, cl=cl)
+
+        # 2) Size filter (pre-fill) on raw component masks
+        label_ids, counts = np.unique(labels0, return_counts=True)
+        areas = dict(zip(label_ids, counts))
+        areas.pop(0, None)  # drop background
+
+        def _keep(area: int) -> bool:
+            return ((min_area is None or area >= min_area) and
+                    (max_area is None or area <= max_area))
+
+        kept_ids = [lab for lab, a in areas.items() if _keep(a)]
+
+        # 3) For each kept label: crop bbox (+pad), apply contact filter using GLOBAL coords,
+        #    then per-bbox fill on the component mask ONLY, finally append the post-fill crop.
+        structure_cf = _structure_from_conn(cf)
+
+        for lab in sorted(kept_ids):
+            obj_slice = slices0[lab - 1]
+            if obj_slice is None:
+                continue
+
+            # Tight bbox on RAW lattice, optionally padded for fill robustness
+            padded_slice = _pad_slice(obj_slice, (H, W), bbox_pad)
+            rsl, csl = padded_slice
+
+            # Local mask for THIS label inside padded bbox (pre-fill)
+            local_labels = labels0[rsl, csl]
+            local_mask = (local_labels == lab)
+            if not local_mask.any():
+                continue
+
+            # --- Edge-contact filter (computed on the RAW mask in GLOBAL coords)
+            rows, cols = np.where(local_mask)
+            # Map to global coords via padded slice origin
+            global_coords = np.stack([
+                rows + (rsl.start or 0),
+                cols + (csl.start or 0)
+            ], axis=1)
+
+            edge_counts = _count_edge_contacts(global_coords, (H, W))
+            classification = _classify_edge_contact(edge_counts)
+            if not _is_contact_match(classification, contact_type):
+                continue
+
+            # 4) Per-bbox hole fill for THIS component only (background connectivity = cf)
+            filled_local = binary_fill_holes(local_mask, structure=structure_cf).astype(np.bool_)
+
+            # 5) Append post-fill crop
+            crops.append(filled_local)
+
+        return crops
+
+    # order == "FL"
+    # 1) GLOBAL hole-fill on entire lattice
+    structure_cf = _structure_from_conn(cf)
+    filled = binary_fill_holes(lattice, structure=structure_cf).astype(np.bool_)
+
+    # 2) Label on FILLED lattice
+    labels, n, slices_ = _label_components(filled, cl=cl)
+
+    # 3) Size filter (post-fill) on filled component masks
+    label_ids, counts = np.unique(labels, return_counts=True)
+    areas = dict(zip(label_ids, counts))
+    areas.pop(0, None)
+
+    def _keep(area: int) -> bool:
+        return ((min_area is None or area >= min_area) and
+                (max_area is None or area <= max_area))
+
+    kept_ids = [lab for lab, a in areas.items() if _keep(a)]
+
+    # 4) For each kept label: crop tight bbox, apply contact filter (GLOBAL coords),
+    #    then append the (already post-fill) crop.
+    for lab in sorted(kept_ids):
+        obj_slice = slices_[lab - 1]
+        if obj_slice is None:
+            continue
+
+        sub = (labels[obj_slice] == lab)
+        if not sub.any():
+            continue
+
+        # --- Edge-contact filter (computed on FILLED mask in GLOBAL coords)
+        rows, cols = np.where(sub)
+        global_coords = np.stack([
+            rows + (obj_slice[0].start or 0),
+            cols + (obj_slice[1].start or 0)
+        ], axis=1)
+
+        edge_counts = _count_edge_contacts(global_coords, (H, W))
+        classification = _classify_edge_contact(edge_counts)
+        if not _is_contact_match(classification, contact_type):
+            continue
+
+        crops.append(sub.astype(np.bool_))
+
+    return crops
+
+def compute_perimeters(mask: np.ndarray, cf: int) -> Tuple[int, int, int]:
+    """
+    Return (raw_perim, hull_perim, accessible_perim) in edge units, using pipeline flood connectivity `cf`.
+
+    Rules:
+      - raw_perim: perimeter on the input mask (no fills).
+      - if cf == 4: fjords sealed upstream ⇒ hull = raw = accessible.
+      - if cf == 8: holes gone but fjords intact ⇒ hull = raw; accessible = raw on a 4-connected fill.
+    """
+    if mask.dtype != np.bool_ or mask.ndim != 2:
+        raise ValueError("compute_perimeters: expected a 2D boolean array.")
+    if cf not in (4, 8):
+        raise ValueError("compute_perimeters: cf must be 4 or 8.")
+
+    raw = compute_perimeter(mask)
+
+    if cf == 4:
+        # Already hole-filled with 4-connectivity upstream; fjords sealed.
+        return int(raw), int(raw), int(raw)
+
+    # cf == 8 → recompute EP on a 4-connected hole-fill of THIS crop
+    filled4 = binary_fill_holes(mask, structure=_STRUCT_4).astype(np.bool_)
+    accessible = compute_perimeter(filled4)
+
+    # Hull perimeter equals raw perimeter for cf==8 (holes were already removed upstream)
+    return int(raw), int(raw), int(accessible)

@@ -81,6 +81,17 @@ def main():
     )
     ap.add_argument("--min-area", type=int, default=1000)
     ap.add_argument("--max-area", type=int, default=7_500_000)
+
+    # Cloud generation / preprocessing
+    ap.add_argument("--order", choices=["LF_bbox", "FL"], default="FL",
+                    help="Preprocess order: LF_bbox (label→size→crop→per-bbox fill) or FL (global fill→label→size→crop). Default: FL to match previous behavior.")
+    ap.add_argument("--cl", type=int, choices=[4, 8], default=4,
+                    help="Label (foreground) connectivity: 4 or 8. Default: 4.")
+    ap.add_argument("--cf", type=int, choices=[4, 8], default=4,
+                    help="Flood (background) connectivity for hole filling: 4 or 8. Default: 4.")
+    ap.add_argument("--bbox-pad", type=int, default=1,
+                    help="Padding (in px) around component bounding boxes for per-bbox fill. 1 recommended to avoid frame artifacts.")
+
     ap.add_argument("--outdir", type=str, default="scratch/threshold_autocorr_bd")
     ap.add_argument("--prefix", type=str, default="thr_autocorr_bd")
     ap.add_argument("--rows-per-flush", type=int, default=400)
@@ -103,7 +114,10 @@ def main():
 
     img_path = Path(args.image)
     img_stem = img_path.stem
-    run_tag = f"{args.prefix}_{img_stem}"
+    run_tag = (f"{args.prefix}_{img_stem}"
+               f"_ord{args.order}_cl{args.cl}_cf{args.cf}"
+    )
+                
 
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -133,6 +147,10 @@ def main():
     print(f"XP backend:            {xp_backend}")
     print(f"Per-cloud parquet dir: {per_cloud_dir}")
     print(f"BD bin width (Δr):     {args.bd_bin_width}")
+    print(f"Processing order:       {args.order}")
+    print(f"Connectivity (label):   {args.cl}")
+    print(f"Connectivity (flood):   {args.cf}")
+    print(f"BBox pad (px):          {args.bbox_pad}")
     print("==============================")
 
     # Load + normalize image
@@ -156,9 +174,14 @@ def main():
         for t in thresholds:
             lattice_bin = threshold_binary(img01, t)
 
-            filled, _ = cloud_utils.flood_fill_and_label_features(lattice_bin)
-            cropped_clouds = cloud_utils.extract_cropped_clouds_by_size(
-                filled, min_area=args.min_area, max_area=args.max_area
+            cropped_clouds = cloud_utils.preprocess_and_crop_clouds(
+                lattice_bin,
+                order=args.order,      # "LF_bbox" or "FL"
+                cl=args.cl,            # 4 or 8 (label connectivity)
+                cf=args.cf,            # 4 or 8 (flood connectivity)
+                min_area=args.min_area,
+                max_area=args.max_area,
+                bbox_pad=args.bbox_pad,
             )
 
             num_clouds_by_threshold[f"{t:.12g}"] = len(cropped_clouds)
@@ -180,8 +203,8 @@ def main():
                 cloud_xp = xp.asarray(cloud, dtype=xp.uint8)
 
                 # --- geometry tags
-                perim = cloud_utils.compute_perimeter(cloud)
-                area  = cloud_utils.compute_area(cloud)
+                raw_perim, hull_perim, accessible_perim = cloud_utils.compute_perimeters(cloud, cf=args.cf)
+                area = cloud_utils.compute_area(cloud)
 
                 # --- WK autocorr (all + boundary)
                 padded, _ = autocorr_utils.pad_for_wk(cloud_xp, r_max, guard=0)
@@ -225,7 +248,9 @@ def main():
                 writer.add(
                     CloudRow(
                         cloud_idx=cloud_counter,
-                        perim=int(perim),
+                        perim_raw=int(raw_perim),
+                        perim_hull=int(hull_perim),
+                        perim_accessible=int(accessible_perim),
                         area=int(area),
 
                         # WK (optional)
@@ -297,6 +322,12 @@ def main():
         "thresholds_file": args.thresholds_file,
         "min_area": args.min_area,
         "max_area": args.max_area,
+        "processing_order": args.order,
+        "connectivity_label": args.cl,
+        "connectivity_flood": args.cf,
+        "dual_topology": ( (args.cl == 4 and args.cf == 8) or (args.cl == 8 and args.cf == 4) ),
+        "area_filter_stage": ("pre-fill" if args.order == "LF_bbox" else "post-fill"),
+        "bbox_pad": args.bbox_pad,
         "rows_per_flush": args.rows_per_flush,
         "max_bytes_per_flush": args.max_bytes_per_flush,
         "xp_backend": xp_backend,
@@ -304,11 +335,8 @@ def main():
         "save_cr": args.save_cr,
         "save_cr_bnd": args.save_cr_bnd,
         "save_numden": args.save_numden,
-
-        # NEW: boundary-distance config
         "bd_bin_width": args.bd_bin_width,
         "center_method": "com",
-        "boundary_connectivity": "4c",
     }
     with open(meta_outfile, "w") as f:
         json.dump(meta, f, indent=2)

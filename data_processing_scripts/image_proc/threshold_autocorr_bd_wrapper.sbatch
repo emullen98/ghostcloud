@@ -11,6 +11,7 @@
 # ============================================================
 # Example submit command:
 # sbatch --export=ALL,INDIR=clouds/cloud_data/cleaned,OUTDIR=scratch/threshold_autocorr_bd,THRESHOLDS_FILE=clouds/data_processing_scripts/image_proc/thresholds.txt,PREFIX=thr_autocorr_bd,BD_BIN_WIDTH=1.0,SAVE_CR=1,SAVE_CR_BND=0,SAVE_NUMDEN=1 clouds/data_processing_scripts/image_proc/threshold_autocorr_bd_wrapper.sbatch
+# sbatch --export=ALL,INDIR=clouds/cloud_data/cleaned,OUTDIR=scratch/new_data/threshold_autocorr_bd/cl8_cf8_ordFL,THRESHOLDS_FILE=clouds/data_processing_scripts/image_proc/thresholds.txt,PREFIX=thr_autocorr_bd,BD_BIN_WIDTH=1.0,SAVE_CR=1,SAVE_CR_BND=0,SAVE_NUMDEN=1,CL=8,CF=8,ORDER=FL,BBOX_PAD=1 clouds/data_processing_scripts/image_proc/threshold_autocorr_bd_wrapper.sbatch
 # Notes:
 #   - THRESHOLDS_FILE is REQUIRED (one threshold per line; '#' comments and blanks allowed)
 #   - SAVE_CR / SAVE_CR_BND / SAVE_NUMDEN default to 0/0/1 if not provided
@@ -35,6 +36,12 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 : "${MAX_BYTES_PER_FLUSH:=$((128*1024*1024))}"
 : "${BD_BIN_WIDTH:=1.0}"
 : "${INNER_SBATCH:=clouds/data_processing_scripts/image_proc/threshold_autocorr_bd_per_image.sbatch}"
+
+# NEW: preprocessing flags (forwarded to inner job)
+: "${ORDER:=FL}"   # LF_bbox|FL
+: "${CL:=4}"       # 4|8 (label connectivity)
+: "${CF:=4}"       # 4|8 (hole-fill connectivity)
+: "${BBOX_PAD:=1}" # integer
 
 # Optional persistence flags for the Python script
 : "${SAVE_CR:=0}"
@@ -61,6 +68,7 @@ echo "[INFO] Found ${#IMAGES[@]} images in $INDIR"
 echo "[INFO] OUTDIR=${OUTDIR}"
 echo "[INFO] THRESHOLDS_FILE=${THRESHOLDS_FILE}"
 echo "[INFO] MIN_AREA=${MIN_AREA}, MAX_AREA=${MAX_AREA}"
+echo "[INFO] ORDER=${ORDER} CL=${CL} CF=${CF} BBOX_PAD=${BBOX_PAD}"
 echo "[INFO] BD_BIN_WIDTH=${BD_BIN_WIDTH}"
 echo "[INFO] SAVE_CR=${SAVE_CR}, SAVE_CR_BND=${SAVE_CR_BND}, SAVE_NUMDEN=${SAVE_NUMDEN}"
 echo "[INFO] Submitting one job per image..."
@@ -78,6 +86,10 @@ PREFIX="$PREFIX",\
 ROWS_PER_FLUSH="$ROWS_PER_FLUSH",\
 MAX_BYTES_PER_FLUSH="$MAX_BYTES_PER_FLUSH",\
 BD_BIN_WIDTH="$BD_BIN_WIDTH",\
+ORDER="$ORDER",\
+CL="$CL",\
+CF="$CF",\
+BBOX_PAD="$BBOX_PAD",\
 SAVE_CR="$SAVE_CR",\
 SAVE_CR_BND="$SAVE_CR_BND",\
 SAVE_NUMDEN="$SAVE_NUMDEN" \

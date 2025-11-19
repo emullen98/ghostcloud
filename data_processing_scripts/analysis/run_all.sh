@@ -14,6 +14,8 @@
 # Environment overrides:
 #   PYTHON=python3.12 bash run_all.sh --master MASTER.yaml
 
+# bash clouds/data_processing_scripts/analysis/run_all.sh --master clouds/data_processing_scripts/analysis/configs/orchestrator.yaml
+
 set -euo pipefail
 
 # ------------------- EDIT THESE if module paths differ --------------

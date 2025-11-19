@@ -65,10 +65,25 @@ def _iter_png_rows(cfg: Dict[str, Any], which: str) -> Iterable[Tuple[np.ndarray
 
         run_dir = Path(paths["png_per_cloud_root"]) / run_tag
         for pq in sorted(run_dir.glob("cloud_metrics.part*.parquet")):
-            need = ["area", "perim", "threshold", num_col]
+            need = [
+                "area",
+                "perim_raw", "perim_hull", "perim_accessible",  # new schema
+                "perim",                                        # legacy
+                "threshold",
+                num_col,
+            ]
             df = read_parquet_cols(str(pq), need)
             if df.empty:
                 continue
+
+            # --- NEW BLOCK: canonicalize perimeter for filtering ---
+            if "perim_raw" not in df.columns and "perim" in df.columns:
+                df["perim_raw"] = df["perim"]
+            if "perim_raw" not in df.columns:
+                df["perim_raw"] = np.nan
+            df["perim"] = df["perim_raw"]
+            # --- END NEW BLOCK ---
+
             df = apply_common_filters(
                 df,
                 flt.get("min_area"), flt.get("max_area"),
@@ -101,10 +116,25 @@ def _iter_siteperc_rows(cfg: Dict[str, Any], which: str) -> Iterable[Tuple[np.nd
     num_col = "num_all" if which == "all" else "num_bnd"
 
     for pq in discover_sp_parquets(paths["siteperc_per_cloud_root"]):
-        need = ["area", "perim", "p_val", num_col]
+        need = [
+            "area",
+            "perim_raw", "perim_hull", "perim_accessible",  # new schema
+            "perim",                                        # legacy
+            "p_val",
+            num_col,
+        ]
         df = read_parquet_cols(pq, need)
         if df.empty:
             continue
+
+        # --- NEW BLOCK: canonicalize perimeter for filtering ---
+        if "perim_raw" not in df.columns and "perim" in df.columns:
+            df["perim_raw"] = df["perim"]
+        if "perim_raw" not in df.columns:
+            df["perim_raw"] = np.nan
+        df["perim"] = df["perim_raw"]
+        # --- END NEW BLOCK ---
+
         df = apply_common_filters(
             df,
             flt.get("min_area"), flt.get("max_area"),
