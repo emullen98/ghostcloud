@@ -14,6 +14,9 @@
 # NOTE: %a = $SLURM_ARRAY_TASK_ID
 
 module load anaconda3/2024.10
+source ~/.bashrc
+conda activate ~/myenv
+export PYTHONPATH='/projects/illinois/eng/physics/dahmen/mullen/':$PYTHONPATH  # for accessing helper_scripts
 
 # Check for help option or missing argument
 if [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ -z "$1" ]; then
