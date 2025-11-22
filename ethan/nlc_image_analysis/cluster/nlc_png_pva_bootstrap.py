@@ -85,10 +85,10 @@ for run in range(bootstrap_runs):
     resampled_perims_acce = perims_acce[indices]
 
     # Logbin data
-    logbin_areas_hull, logbin_perims_hull, _ = hs.logbinnning(resampled_areas, 
+    logbin_areas_hull, logbin_perims_hull, _ = hs.logbinning(resampled_areas, 
                                                               resampled_perims_hull, 
                                                               logbin_count)
-    logbin_areas_acce, logbin_perims_acce, _ = hs.logbinnning(resampled_areas, 
+    logbin_areas_acce, logbin_perims_acce, _ = hs.logbinning(resampled_areas, 
                                                               resampled_perims_acce, 
                                                               logbin_count)
 
